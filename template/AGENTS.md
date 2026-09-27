@@ -11,8 +11,8 @@ Read [docs/architecture.md](docs/architecture.md) before changing architecture; 
 
 ## Conventions
 
-- Non-trivial changes must include an Agent Note in the same change, because code and docs cannot carry the rationale and rejected alternatives; update the owning note or add one, with [mechanical/local exemptions](.agents/notes/README.md#when-to-write-one). Archived notes are frozen: never edit or treat them as current authority ([archive policy](.agents/notes/archived/AGENTS.md)).
-- **Tests describe behavior, not correctness.** Change obsolete behavior with its tests; record the reason in the owning Agent Note when the change is non-trivial.
+- Create Agent Notes only for durable decision rationale that code, tests, and existing docs cannot carry; mechanical/local edits are exempt, including local UI changes ([scope](.agents/notes/README.md#when-to-write-one)). Archived notes are frozen: never edit or treat them as current authority ([archive policy](.agents/notes/archived/AGENTS.md)).
+- **Tests describe behavior, not correctness.** Change obsolete behavior with its tests; explain why in the change description.
 - Treat generated catalogs, snapshots, and fixtures as derivative. Edit the owning source or scenario first, then regenerate the artifact.
 - Files end with exactly one trailing newline.
 

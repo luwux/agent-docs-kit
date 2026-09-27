@@ -31,7 +31,7 @@ Placement: rationale → Agent Notes; standing orders → root `AGENTS.md` with 
 
 ## Writing rules
 
-- **Document current state, not change history.** Avoid "previously/now/no longer", PRs, commits, and stack positions in durable prose; name the live mechanism. Put change stories in commits, PRs, or Agent Notes; Agent Notes may cite merged PRs and issues as evidence.
+- **Document current state.** Keep history in commits, PRs, or Agent Notes. Other prose names live mechanisms, not changes or stack positions.
 - **One physical line per paragraph**: use editor soft-wrap. Code blocks, tables, and list structure keep their formatting; code comments stay under the linter's column limit.
 - **Comments and JSDoc state complete contracts, not reasoning transcripts.** Preserve behavior, failure, timing, ownership, modality, exceptions, consequences, and non-obvious orientation; delete narration, test walkthroughs, review analysis, and code restatement. Keep the local contract and link its rationale. Use [the prose standard](../.agents/skills/dsh-prose-standard/SKILL.md) for details.
 - Write directly: name actors and facts. Name the exact check, type, API, operation, or behavior instead of metaphorical "gate", "vocabulary", or "surface".
@@ -40,8 +40,8 @@ Placement: rationale → Agent Notes; standing orders → root `AGENTS.md` with 
 
 Hunt these in any doc:
 
-- The same rule repeated unnecessarily in more than one home. Grep a distinctive phrase; keep one home and link the rest.
-- Narrated history or war stories: "previously", "now", "no longer", "used to", "renamed", "was moved", PRs, or commits. State the current fact; link an Agent Note when needed.
+- Duplicated rules: search a distinctive phrase; keep one home and link the rest.
+- History outside its permitted tier: state current facts and link the historical owner.
 - Implementation-status annotations in prose or diagrams ("implemented!", "future: …"). Status rots.
 - Hand-restated catalogs, JSDoc, or inventories of tests and status when source or a generator is authoritative.
 - Reasoning transcripts: step-by-step implementation narration, proof of obvious branches, test walkthroughs, or rejected local alternatives. Keep the resulting contract or durable rationale; delete the path used to derive it.
@@ -50,6 +50,6 @@ Hunt these in any doc:
 - Emphasis inflation: bold, CAPS, or "critically" everywhere means nothing stands out. Reserve emphasis for the clause that changes behavior.
 - Spec-speak in `implemented/` Agent Notes: "should", migration plans, acceptance checklists. An implemented Agent Note describes what is, per the [implemented-note instructions](../.agents/notes/implemented/AGENTS.md).
 
-## Cross-reference with machine-checkable links, never free prose
+## Repository references
 
-Link repository references with relative Markdown paths, never bare filenames or Agent Note numbers.
+Use relative Markdown links for current files, never bare filenames or Agent Note numbers. Use tags or PR numbers for historical references.

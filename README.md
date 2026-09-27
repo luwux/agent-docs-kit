@@ -8,7 +8,7 @@
 |---|---|---|
 | 适合 | 需要长期保留决策记录与格式校验的项目（如 luwux.log） | 单人加 agent 的小项目、新仓库 |
 | 文档结构 | `docs/architecture.md`、`docs/testing.md`，外加 `.agents/notes/` 的 proposed/implemented/rejected/archived 生命周期 | `docs/specs/`（当前状态）、`docs/decisions/`（ADR）、`docs/tasks/`（任务简报） |
-| 记录义务 | 每个非平凡改动都须新增或更新 Agent Note | 只在未来 agent 很可能推翻某个决定时才写 ADR；只在跨会话的工作中才写任务简报 |
+| 记录义务 | 只为代码、测试和文档解释不了的长期决策理由写 Agent Note | 只在未来 agent 很可能推翻某个决定时才写 ADR；只在跨会话的工作中才写任务简报 |
 | 篇幅约束 | 无 | 任务简报约 60 行（含结果），ADR 约 50 行 |
 | 校验 | `scripts/verify_agent_notes.py`（只查结构与格式） | 无；质量靠判断 |
 | Skills | 完整版 prose / simplification | 精简版，不涉及 Agent Notes |
@@ -54,6 +54,7 @@ python3 scripts/verify_agent_notes.py
 
 ## 变更记录
 
-- 2026-09-27：新增 `lite` profile（`template-lite/`、`--profile`）；删除模板中误入的 `.DS_Store`；初始化器改为忽略 `.DS_Store`、`Thumbs.db`、`*.pyc` 与 `__pycache__/`，原先只忽略 `.DS_Store`，遇到其他平台文件会中止；`full` 的内容保持不变。
+- 2026-09-27：`full` 同步 DeepSeek Harness `21638c5` 的文档流程变更：放宽写 Note 的门槛，新增“小改动 Note 直接删除”规则，重写 simplification skill（详见 [UPSTREAM.md](UPSTREAM.md)）。已安装的项目（如 luwux.log）需手动同步。
+- 2026-09-27：新增 `lite` profile（`template-lite/`、`--profile`）；删除模板中误入的 `.DS_Store`；初始化器改为忽略 `.DS_Store`、`Thumbs.db`、`*.pyc` 与 `__pycache__/`，原先只忽略 `.DS_Store`，遇到其他平台文件会中止。
 
 模板中源自上游的文本依照 [DeepSeek Harness MIT 许可证](template/.agents/LICENSE.deepseek-harness) 使用。
