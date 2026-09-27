@@ -1,60 +1,65 @@
 # DSH Agent Docs Kit
 
-可复制到不同代码仓库的 Agent 文档骨架，源自 DeepSeek Harness 的 Agent Notes 体系（固定提交与改动见 [UPSTREAM.md](UPSTREAM.md)）。套件不复制上游的产品架构、命令、发布流程与双语机制。本仓库自身不套用模板里的文档规则，只维护这份 README。
+**This kit is modeled on the agent documentation system of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).** It extracts the project-independent parts — standing agent instructions, one home per fact, current-state docs, decision records, and the prose and simplification skills — into a scaffold you can install into any repository. It is not affiliated with or endorsed by DeepSeek.
 
-## 两个 profile
+## Profiles
 
-| | `full`（默认） | `lite` |
+| | `full` (default) | `lite` |
 |---|---|---|
-| 适合 | 需要长期保留决策记录与格式校验的项目（如 luwux.log） | 单人加 agent 的小项目、新仓库 |
-| 文档结构 | `docs/architecture.md`、`docs/testing.md`，外加 `.agents/notes/` 的 proposed/implemented/rejected/archived 生命周期 | `docs/specs/`（当前状态）、`docs/decisions/`（ADR）、`docs/tasks/`（任务简报） |
-| 记录义务 | 只为代码、测试和文档解释不了的长期决策理由写 Agent Note | 只在未来 agent 很可能推翻某个决定时才写 ADR；只在跨会话的工作中才写任务简报 |
-| 篇幅约束 | 无 | 任务简报约 60 行（含结果），ADR 约 50 行 |
-| 校验 | `scripts/verify_agent_notes.py`（只查结构与格式） | 无；质量靠判断 |
-| Skills | 完整版 prose / simplification | 精简版，不涉及 Agent Notes |
-| 文件数 | 12 | 8 |
+| For | Projects that keep a long-lived decision record with a format check | Small projects, one person working with agents, new repositories |
+| Documents | `docs/architecture.md`, `docs/testing.md`, and `.agents/notes/` with the proposed / implemented / rejected / archived lifecycle | `docs/specs/` (current state), `docs/decisions/` (ADRs), `docs/tasks/` (task briefs) |
+| When to write a record | An Agent Note only for durable decision rationale that code, tests, and docs cannot carry | An ADR only when a future agent would likely reverse the decision; a task brief only for work that spans sessions |
+| Size budgets | None | Task brief about 60 lines including its result; ADR about 50 lines |
+| Check | `scripts/verify_agent_notes.py` (structure and format only) | None |
+| Skills | Full prose and simplification skills | Condensed skills without Agent Notes |
+| Files installed | 12 | 8 |
 
-两者都保留“一个事实只有一个归属”和“规格只写当前状态”两条规则，并附带 MIT 许可证副本。
+Both profiles keep the one-home-per-fact rule and the current-state rule for specs.
 
-## 初始化
+## Install
 
-先预览，不写文件：
+Requires Python 3.9 or later. Preview first; nothing is written:
 
 ```bash
 python3 init.py /absolute/path/to/project --profile lite
 ```
 
-确认后应用：
+Then apply:
 
 ```bash
 python3 init.py /absolute/path/to/project --profile lite --apply
 ```
 
-不加 `--profile` 时等同于 `full`。`--claude-symlinks` 会额外创建指向 `AGENTS.md` 的 `CLAUDE.md` 链接。
+Omit `--profile` for `full`. Add `--claude-symlinks` to also create `CLAUDE.md -> AGENTS.md` links.
 
-初始化器只复制每个 profile 在代码中显式列出的文件，忽略平台垃圾文件（`.DS_Store`、`Thumbs.db`、`*.pyc`、`__pycache__/`）；遇到其他未列入清单的模板文件、同名目标文件或被符号链接替换的目录，就拒绝整个操作，一个文件也不写。已有文档体系的项目请以 [`template/`](template/) 或 [`template-lite/`](template-lite/) 为参照手工合并。
+The initializer copies only the files each profile lists in `init.py` and ignores platform files (`.DS_Store`, `Thumbs.db`, `*.pyc`, `__pycache__/`). It refuses the whole install, writing nothing, when the template holds any other unlisted file, a destination file already exists, or a destination directory is a symlink. For a repository that already has documentation, merge from [`template/`](template/) or [`template-lite/`](template-lite/) by hand.
 
-初始化后，架构文档会如实标明“尚未记录目标仓库架构”。在审计目标仓库并写入当前事实之前，不要宣称适配已经完成。
+After installing, the architecture document states that the target's architecture is not yet recorded. Audit the repository and record its current facts before treating the adoption as complete.
 
-## 验证
+## Check
 
-修改初始化器或模板后，在套件根目录运行：
+Kit tests, after changing the initializer or a template:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-`full` 目标仓库的文档检查：
+In a `full` target repository:
 
 ```bash
 python3 scripts/verify_agent_notes.py
 ```
 
-该脚本只能证明 Agent Note 的目录、文件名、header、状态与必需 section 一致；即使没有任何 Note 也会通过。它不检查链接、supersession 或内容真实性。
+The verifier proves only that Agent Note directories, filenames, headers, statuses, and required sections are consistent; it passes with zero notes and does not check links, supersession, or whether content is true.
 
-## 变更记录
+## Origin and license
 
-- 2026-09-27：`full` 同步 DeepSeek Harness `21638c5` 的文档流程变更：放宽写 Note 的门槛，新增“小改动 Note 直接删除”规则，重写 simplification skill（详见 [UPSTREAM.md](UPSTREAM.md)）。已安装的项目（如 luwux.log）需手动同步。
-- 2026-09-27：新增 `lite` profile（`template-lite/`、`--profile`）；删除模板中误入的 `.DS_Store`；初始化器改为忽略 `.DS_Store`、`Thumbs.db`、`*.pyc` 与 `__pycache__/`，原先只忽略 `.DS_Store`，遇到其他平台文件会中止。
+The template text is adapted from DeepSeek Harness, pinned at commit [`b150a55`](https://github.com/deepseek-ai/deepseek-harness/tree/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e) and last reviewed at [`21638c5`](https://github.com/deepseek-ai/deepseek-harness/tree/21638c56315ae6a2b552d6091945d3144c9af32e). Product-specific architecture, commands, release flow, and bilingual machinery were removed. [UPSTREAM.md](UPSTREAM.md) (in Chinese) maps each mechanism to its upstream source and lists every local deviation.
 
-模板中源自上游的文本依照 [DeepSeek Harness MIT 许可证](template/.agents/LICENSE.deepseek-harness) 使用。
+- DSH-derived text remains under the [DeepSeek Harness MIT license](template/.agents/LICENSE.deepseek-harness), Copyright (c) 2026 DeepSeek. Both templates install a copy of that notice as `.agents/LICENSE.deepseek-harness`; keep it in target repositories.
+- Everything else in this repository is under the [MIT license](LICENSE), Copyright (c) 2026 luwux.
+
+## Changes
+
+- 2026-09-27: `full` synced with DSH `21638c5`: Agent Notes only for durable rationale, notes that record only small UI or mechanical changes are deleted, and the simplification skill is rewritten around removable obligations. Installed repositories must be updated by hand.
+- 2026-09-27: added the `lite` profile (`template-lite/`, `--profile`); the initializer ignores `.DS_Store`, `Thumbs.db`, `*.pyc`, and `__pycache__/` instead of aborting on anything but `.DS_Store`.
