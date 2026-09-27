@@ -6,6 +6,8 @@
 
 为减少额外输入要求和重复工作，本地适配参考 [Astra 行为指南](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra#prompting-best-practices)，删除文案 skill 的显式 `scope` 前置要求，明确不引入或改变持久决策的机械性及局部小改动可豁免 Note，测试由 Agent 自行选择最少且必要的项目，允许不必要时不测；取消固定 Git 检查、操作说明的强制实测及验证责任方要求，并去除重复指令；必要的局部契约仍按文案 skill 保留。lifecycle、class、Note 格式、决策维护与归档机制保持原样。
 
+`lite` profile（`template-lite/`）的两个 skill 是上述同名 skill 的精简改写：删除 Agent Note 生命周期相关内容，把决策与任务记录改为 ADR 和短任务简报；其来源仍为下表同名文件。
+
 若本机另有完整 clone，可将它以 detached HEAD 检出到同一固定提交，并放在可选同级路径 `../deepseek-harness` 以便搜索与逐文件比较。该本机路径不是便携包依赖；其他机器使用下表的固定提交 URL。
 
 | 机制 | 原文 |

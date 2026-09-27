@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -81,13 +83,27 @@ class KitRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             copied_kit = Path(temporary) / "kit"
             shutil.copytree(KIT_ROOT, copied_kit)
-            (copied_kit / "template" / "docs" / ".DS_Store").write_bytes(b"metadata")
+            template = copied_kit / "template"
+            junk = (
+                template / "docs" / ".DS_Store",
+                template / "docs" / "Thumbs.db",
+                template / "scripts" / "stray.pyc",
+                template / "scripts" / "__pycache__" / "verify_agent_notes.cpython-39.pyc",
+                template / "scripts" / "__pycache__" / "notes.txt",
+            )
+            for path in junk:
+                path.parent.mkdir(exist_ok=True)
+                path.write_bytes(b"metadata")
             target = Path(temporary) / "target"
             target.mkdir()
 
             result = self.install(target, copied_kit / "init.py")
-            self.assertNotIn(".DS_Store", result.stdout)
-            self.assertFalse((target / "docs" / ".DS_Store").exists())
+            self.assertIn("created 12 files", result.stdout)
+            for path in junk:
+                relative = path.relative_to(template)
+                self.assertNotIn(relative.name, result.stdout)
+                self.assertFalse((target / relative).exists(), relative)
+            self.assertFalse((target / "scripts" / "__pycache__").exists())
             (target / ".agents" / "notes" / ".DS_Store").write_bytes(b"metadata")
             verified = self.verify(target)
             self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
@@ -116,6 +132,49 @@ class KitRegressionTests(unittest.TestCase):
                 unsafe_template.stdout + unsafe_template.stderr,
             )
             self.assertIn("unexpected template file: docs/.DS_Store", unsafe_template.stderr)
+
+    def test_lite_profile_installs_only_lite_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "target"
+            target.mkdir()
+
+            installed = self.install(target, INIT, "--profile", "lite", "--claude-symlinks")
+            self.assertIn("profile: lite", installed.stdout)
+            self.assertIn("created 9 files", installed.stdout)
+            self.assertFalse((target / ".agents" / "notes").exists())
+            self.assertFalse((target / "scripts").exists())
+            self.assertEqual(os.readlink(target / "CLAUDE.md"), "AGENTS.md")
+            for path in (
+                "AGENTS.md",
+                "docs/AGENTS.md",
+                "docs/specs/architecture.md",
+                "docs/decisions/TEMPLATE.md",
+                "docs/tasks/TEMPLATE.md",
+                ".agents/skills/dsh-prose-standard/SKILL.md",
+                ".agents/skills/dsh-find-simplifications/SKILL.md",
+            ):
+                self.assertTrue((target / path).is_file(), path)
+
+            installed_text = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in target.rglob("*.md")
+                if not path.is_symlink()
+            )
+            self.assertNotIn("Agent Note", installed_text)
+            self.assertNotIn("verify_agent_notes", installed_text)
+
+    def test_template_markdown_links_resolve(self) -> None:
+        link = re.compile(r"\]\(([^)#:]+)(?:#[^)]*)?\)")
+        documents = [
+            *(KIT_ROOT / "template").rglob("*.md"),
+            *(KIT_ROOT / "template-lite").rglob("*.md"),
+        ]
+        for document in documents:
+            # Inline code holds illustrative link syntax, not real references.
+            prose = re.sub(r"`[^`]*`", "", document.read_text(encoding="utf-8"))
+            for target in link.findall(prose):
+                resolved = (document.parent / target).resolve()
+                self.assertTrue(resolved.exists(), f"{document}: {target}")
 
     def test_collision_preflight_is_globally_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
