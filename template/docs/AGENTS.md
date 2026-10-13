@@ -22,12 +22,13 @@ Each fact has one home: the tier whose job it is; elsewhere, link there. Essenti
 |---|---|---|
 | Root `AGENTS.md` | Standing orders: rules an agent needs in context in every session, one to three lines each, linking its home | Stories, worked examples, situational procedures, anything restated from a linked home |
 | Subtree `AGENTS.md` (`docs/`, `.agents/notes/`) | Orders specific to that subtree | Repo-wide rules the root file already carries |
-| [architecture.md](architecture.md) | Ordered map: composition and extension points | Decision rationale (→ Agent Notes), implementation-status annotations |
+| [architecture.md](architecture.md) | Ordered map: composition, cross-subsystem flows, and extension points, with one short entry per subsystem linking its page | Per-subsystem detail (→ subsystems), decision rationale (→ Agent Notes), implementation-status annotations |
+| [subsystems/](subsystems/README.md) | One reference page per subsystem: owned source paths, data, behavior, failure, configuration, and extension points ([page rules](subsystems/README.md#page-rules)) | Cross-subsystem flow narration (→ architecture.md), decision rationale (→ Agent Notes), restated code |
 | [testing.md](testing.md) | Testing policy | Testing mechanisms, fixtures, and harnesses owned at a lower level |
 | [Agent Notes](../.agents/notes/README.md) | Active decision records: the why, what-was-given-up, and required verification; `implemented/` notes describe shipped reality in present tense | Migration plans, acceptance-task checklists, and spec-speak once the decision has shipped; archived notes are frozen history, never current authority |
 | Skills (`.agents/skills/`) | Reusable workflows and specialized decision standards | Product and runtime contracts (→ docs or source) |
 
-Placement: rationale → Agent Notes; standing orders → root `AGENTS.md` with a rationale link.
+Placement: one subsystem's behavior → its subsystem page; cross-subsystem flows → architecture.md; rationale → Agent Notes; standing orders → root `AGENTS.md` with a rationale link.
 
 ## Writing rules
 

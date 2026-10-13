@@ -14,6 +14,12 @@ In scope:
 Out of scope:
 -
 
+## Subsystem specs
+
+The specs that own the paths this task edits. The implementing agent reads these, not the whole docs tree.
+
+-
+
 ## Constraints
 
 Choices already made and boundaries the agent must not violate, such as data, wire, or deployment safety. Link specs and ADRs instead of restating them.

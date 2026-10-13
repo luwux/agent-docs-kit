@@ -34,11 +34,16 @@ PROFILES = {
             "AGENTS.md",
             "docs/AGENTS.md",
             "docs/architecture.md",
+            "docs/subsystems/README.md",
             "docs/testing.md",
             "scripts/verify_agent_notes.py",
+            "scripts/verify_subsystem_pages.py",
         ),
         claude_links=("CLAUDE.md", ".agents/notes/implemented/CLAUDE.md"),
-        next_step="review docs/architecture.md, then run python3 scripts/verify_agent_notes.py",
+        next_step=(
+            "record the architecture map and subsystem pages, then run "
+            "python3 scripts/verify_agent_notes.py and python3 scripts/verify_subsystem_pages.py"
+        ),
     ),
     "lite": Profile(
         root=KIT_ROOT / "template-lite",
@@ -49,11 +54,16 @@ PROFILES = {
             "AGENTS.md",
             "docs/AGENTS.md",
             "docs/decisions/TEMPLATE.md",
+            "docs/specs/README.md",
             "docs/specs/architecture.md",
             "docs/tasks/TEMPLATE.md",
+            "scripts/verify_subsystem_pages.py",
         ),
         claude_links=("CLAUDE.md",),
-        next_step="record the target architecture in docs/specs/architecture.md",
+        next_step=(
+            "record the architecture map and subsystem specs in docs/specs/, "
+            "then run python3 scripts/verify_subsystem_pages.py"
+        ),
     ),
 }
 # Platform metadata that editors and interpreters drop into the kit checkout.
