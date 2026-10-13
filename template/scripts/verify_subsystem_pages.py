@@ -34,7 +34,7 @@ import sys
 REPOSITORY = Path(__file__).resolve().parent.parent
 # A repository that keeps subsystem pages in another flat directory sets it here
 # instead of renaming the directory.
-PAGES = REPOSITORY / "docs" / "subsystems"
+PAGES = REPOSITORY / "docs" / "specs"
 INDEX = PAGES / "README.md"
 # Files in PAGES that are not subsystem pages; the index is always exempt.
 NON_SUBSYSTEM_PAGES: set[str] = set()

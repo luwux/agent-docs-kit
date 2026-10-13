@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the allowlisted Agent Docs scaffold without overwriting files."""
+"""Install the allowlisted agent docs scaffold without overwriting files."""
 
 from __future__ import annotations
 
@@ -7,65 +7,27 @@ import argparse
 import os
 from pathlib import Path
 import sys
-from typing import NamedTuple
 
 
 KIT_ROOT = Path(__file__).resolve().parent
 
 
-class Profile(NamedTuple):
-    root: Path
-    payload: tuple[str, ...]
-    claude_links: tuple[str, ...]
-    next_step: str
-
-
-PROFILES = {
-    "full": Profile(
-        root=KIT_ROOT / "template",
-        payload=(
-            ".agents/LICENSE.deepseek-harness",
-            ".agents/notes/AGENTS.md",
-            ".agents/notes/README.md",
-            ".agents/notes/archived/AGENTS.md",
-            ".agents/notes/implemented/AGENTS.md",
-            ".agents/skills/dsh-find-simplifications/SKILL.md",
-            ".agents/skills/dsh-prose-standard/SKILL.md",
-            "AGENTS.md",
-            "docs/AGENTS.md",
-            "docs/architecture.md",
-            "docs/subsystems/README.md",
-            "docs/testing.md",
-            "scripts/verify_agent_notes.py",
-            "scripts/verify_subsystem_pages.py",
-        ),
-        claude_links=("CLAUDE.md", ".agents/notes/implemented/CLAUDE.md"),
-        next_step=(
-            "record the architecture map and subsystem pages, then run "
-            "python3 scripts/verify_agent_notes.py and python3 scripts/verify_subsystem_pages.py"
-        ),
-    ),
-    "lite": Profile(
-        root=KIT_ROOT / "template-lite",
-        payload=(
-            ".agents/LICENSE.deepseek-harness",
-            ".agents/skills/dsh-find-simplifications/SKILL.md",
-            ".agents/skills/dsh-prose-standard/SKILL.md",
-            "AGENTS.md",
-            "docs/AGENTS.md",
-            "docs/decisions/TEMPLATE.md",
-            "docs/specs/README.md",
-            "docs/specs/architecture.md",
-            "docs/tasks/TEMPLATE.md",
-            "scripts/verify_subsystem_pages.py",
-        ),
-        claude_links=("CLAUDE.md",),
-        next_step=(
-            "record the architecture map and subsystem specs in docs/specs/, "
-            "then run python3 scripts/verify_subsystem_pages.py"
-        ),
-    ),
-}
+TEMPLATE_ROOT = KIT_ROOT / "template"
+PAYLOAD = (
+    "AGENTS.md",
+    "docs/AGENTS.md",
+    "docs/architecture.md",
+    "docs/decisions/TEMPLATE.md",
+    "docs/product.md",
+    "docs/specs/README.md",
+    "docs/tasks/TEMPLATE.md",
+    "scripts/verify_subsystem_pages.py",
+)
+CLAUDE_LINKS = ("CLAUDE.md", "docs/CLAUDE.md")
+NEXT_STEP = (
+    "record docs/architecture.md, docs/product.md, and one spec per subsystem in docs/specs/, "
+    "then run python3 scripts/verify_subsystem_pages.py --map"
+)
 # Platform metadata that editors and interpreters drop into the kit checkout.
 IGNORED_TEMPLATE_NAMES = {".DS_Store", "Thumbs.db"}
 IGNORED_TEMPLATE_SUFFIXES = {".pyc"}
@@ -75,7 +37,7 @@ IGNORED_TEMPLATE_DIRECTORIES = {"__pycache__"}
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description=(
-            "Preview or install the DSH-derived Agent Docs scaffold. "
+            "Preview or install the agent docs scaffold. "
             "Existing destination files are never overwritten."
         )
     )
@@ -88,13 +50,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--claude-symlinks",
         action="store_true",
-        help="also create CLAUDE.md -> AGENTS.md compatibility links",
-    )
-    result.add_argument(
-        "--profile",
-        choices=sorted(PROFILES),
-        default="full",
-        help="full: Agent Notes lifecycle and verifier; lite: specs, ADRs, and short task briefs",
+        help="also create CLAUDE.md -> AGENTS.md links in the root and docs/",
     )
     return result
 
@@ -112,23 +68,23 @@ def ignored_template_entry(root: Path, path: Path) -> bool:
     )
 
 
-def template_files(profile: Profile) -> tuple[Path, ...]:
+def template_files() -> tuple[Path, ...]:
     """Return the reviewed payload and reject missing or unreviewed files."""
 
     discovered = {
-        path.relative_to(profile.root).as_posix()
-        for path in profile.root.rglob("*")
+        path.relative_to(TEMPLATE_ROOT).as_posix()
+        for path in TEMPLATE_ROOT.rglob("*")
         if (path.is_file() or path.is_symlink())
-        and not ignored_template_entry(profile.root, path)
+        and not ignored_template_entry(TEMPLATE_ROOT, path)
     }
-    expected = set(profile.payload)
+    expected = set(PAYLOAD)
     violations = [
         *(f"missing allowlisted file: {path}" for path in sorted(expected - discovered)),
         *(f"unexpected template file: {path}" for path in sorted(discovered - expected)),
     ]
     if violations:
         raise ValueError("template payload mismatch:\n- " + "\n- ".join(violations))
-    return tuple(profile.root / path for path in profile.payload)
+    return tuple(TEMPLATE_ROOT / path for path in PAYLOAD)
 
 
 def planned_directories(
@@ -145,16 +101,15 @@ def planned_directories(
 
 def planned_files(
     target: Path,
-    profile: Profile,
     sources: tuple[Path, ...],
     include_claude: bool,
 ) -> tuple[tuple[Path, Path | str], ...]:
     files: list[tuple[Path, Path | str]] = [
-        (target / source.relative_to(profile.root), source)
+        (target / source.relative_to(TEMPLATE_ROOT), source)
         for source in sources
     ]
     if include_claude:
-        files.extend((target / link, "AGENTS.md") for link in profile.claude_links)
+        files.extend((target / link, "AGENTS.md") for link in CLAUDE_LINKS)
     return tuple(files)
 
 
@@ -191,14 +146,13 @@ def main() -> int:
         print(f"refusing broad target: {target}", file=sys.stderr)
         return 2
 
-    profile = PROFILES[args.profile]
     try:
-        sources = template_files(profile)
+        sources = template_files()
     except ValueError as error:
         print(error, file=sys.stderr)
         return 2
     if not sources:
-        print(f"template contains no files: {profile.root}", file=sys.stderr)
+        print(f"template contains no files: {TEMPLATE_ROOT}", file=sys.stderr)
         return 2
     source_symlinks = [source for source in sources if source.is_symlink()]
     if source_symlinks:
@@ -213,8 +167,8 @@ def main() -> int:
         print(f"cannot snapshot template payload: {error}", file=sys.stderr)
         return 2
 
-    files = planned_files(target, profile, sources, args.claude_symlinks)
-    directories = planned_directories(target, profile.root, sources)
+    files = planned_files(target, sources, args.claude_symlinks)
+    directories = planned_directories(target, TEMPLATE_ROOT, sources)
     path_conflicts = directory_conflicts(target, directories)
     if path_conflicts:
         print("initialization refused; unsafe destination directories:", file=sys.stderr)
@@ -231,7 +185,6 @@ def main() -> int:
         return 2
 
     print(f"target: {target}")
-    print(f"profile: {args.profile}")
     print("planned files:")
     for destination, source in files:
         kind = f"symlink -> {source}" if isinstance(source, str) else "file"
@@ -280,7 +233,7 @@ def main() -> int:
         return 1
 
     print(f"created {len(created_files)} files; no existing file was modified")
-    print(f"next: {profile.next_step}")
+    print(f"next: {NEXT_STEP}")
     return 0
 
 

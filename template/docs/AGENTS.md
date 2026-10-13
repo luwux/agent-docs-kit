@@ -1,56 +1,34 @@
-# AGENTS.md — The documentation standard
+# AGENTS.md — Documentation
 
-This file defines document structure, Markdown tiers, and writing rules. Use [the prose standard](../.agents/skills/dsh-prose-standard/SKILL.md) for required coverage and editorial judgment.
+This file applies to `docs/` alongside the root `AGENTS.md`.
 
-## Document structure
+## Layout
 
-These rules apply to human-facing documentation; [Agent Notes](../.agents/notes/README.md) remain outside their scope. A document's subject and tree position fix its scope: describe its own subject at appropriate detail and direct children only by purpose, responsibility, and high-level behavior; link to the owning descendant for lower-level detail. Document type does not widen that scope. A reference may be exhaustive only about its own subject. Testing mechanisms, fixtures, and harnesses belong at the lowest owning level; higher documents link there.
+| Location | Holds | Changes |
+| --- | --- | --- |
+| [architecture.md](architecture.md) | The map: how subsystems compose, flows that cross them, one entry per subsystem | With the code |
+| [specs/](specs/README.md) | One page per subsystem: current behavior and known limitations | With the code, in the same change |
+| [product.md](product.md) | Scope, goals, non-goals, and direction | When the direction changes |
+| `decisions/NNNN-title.md` | Why a durable choice was made | Not after acceptance; a reversal is a new decision |
+| `tasks/NNNN-title.md` | Bounded work: goal, scope, constraints, acceptance, result | While open; frozen once done or dropped |
+| `research/YYYY-MM-DD-title.md` | Dated evidence: measurements, experiments, comparisons with other projects | Never; newer evidence is a new file |
+| Other `docs/*.md` | Current-state topics that span subsystems, such as testing, deployment, or an upstream adaptation | With the code |
 
-Classify every in-scope document as a tutorial or reference. Tutorials follow an ordered path to an outcome and introduce only what each step needs. References define a lookup scope and current behavior without a teaching sequence. Separate substantial tutorial and reference content; label a section when either part is small.
+## Rules
 
-Before writing a tutorial, privately classify the reader's starting knowledge and each concept as beginner, intermediate, or advanced. Establish prerequisites before dependent concepts, increase difficulty gradually, and move unnecessary advanced material to a later tutorial or reference.
+1. Current-state documents (architecture, specs, and topic documents) describe what exists now. Replace a stale statement in place; do not append history or name the change that introduced a behavior.
+2. Each fact has one home; link to it elsewhere. A local contract may repeat an essential behavior, failure, or ownership fact where it is used.
+3. Current-state documents never list unbuilt behavior. Planned work lives in a task, the direction in [product.md](product.md), and the reason for a choice in a decision. When work ships, its behavior moves into the spec.
 
-Before writing an operational tutorial, define the reader's starting state, observable outcome, likely failure, recovery path, and next useful depth.
+## When to write each
 
-Author in this order: locate the document in the tree; set its permitted detail; choose tutorial or reference; for a tutorial, order concepts by prerequisite and difficulty; relocate descendant-owned detail; replace lower-level explanations with links to their owners.
+- **Decision**: when a future agent would likely reverse a choice without knowing why, or when the user decided something the code does not make obvious. Mechanical and small local edits need none. Aim for about 50 lines. An accepted decision is not edited; to reverse it, write a new decision and change the old one's status line to `Superseded by NNNN`.
+- **Task**: for work that spans sessions or needs agreed constraints; small changes need none. Its status is `Open`, `Done`, or `Dropped`; fill in the result when the work ends. A finished task is history: move any rule that still binds into a spec or decision, because current-state documents never depend on a task. Aim for about 60 lines; split independent work into separate tasks.
+- **Research**: when evidence behind a decision or spec would be costly to reproduce. Name the date and the code version it measured. It does not describe current behavior; specs and decisions link it.
+- Decisions and tasks are numbered with four digits in creation order. Start from [the decision template](decisions/TEMPLATE.md) or [the task template](tasks/TEMPLATE.md).
 
-## The tier taxonomy: one home per fact
+## Writing
 
-Each fact has one home: the tier whose job it is; elsewhere, link there. Essential contract facts may repeat locally, per [the prose standard](../.agents/skills/dsh-prose-standard/SKILL.md#preserve-the-complete-proposition).
-
-| Tier | Job | Does NOT belong there |
-|---|---|---|
-| Root `AGENTS.md` | Standing orders: rules an agent needs in context in every session, one to three lines each, linking its home | Stories, worked examples, situational procedures, anything restated from a linked home |
-| Subtree `AGENTS.md` (`docs/`, `.agents/notes/`) | Orders specific to that subtree | Repo-wide rules the root file already carries |
-| [architecture.md](architecture.md) | Ordered map: composition, cross-subsystem flows, and extension points, with one short entry per subsystem linking its page | Per-subsystem detail (→ subsystems), decision rationale (→ Agent Notes), implementation-status annotations |
-| [subsystems/](subsystems/README.md) | One reference page per subsystem: owned source paths, data, behavior, failure, configuration, and extension points ([page rules](subsystems/README.md#page-rules)) | Cross-subsystem flow narration (→ architecture.md), decision rationale (→ Agent Notes), restated code |
-| [testing.md](testing.md) | Testing policy | Testing mechanisms, fixtures, and harnesses owned at a lower level |
-| [Agent Notes](../.agents/notes/README.md) | Active decision records: the why, what-was-given-up, and required verification; `implemented/` notes describe shipped reality in present tense | Migration plans, acceptance-task checklists, and spec-speak once the decision has shipped; archived notes are frozen history, never current authority |
-| Skills (`.agents/skills/`) | Reusable workflows and specialized decision standards | Product and runtime contracts (→ docs or source) |
-
-Placement: one subsystem's behavior → its subsystem page; cross-subsystem flows → architecture.md; rationale → Agent Notes; standing orders → root `AGENTS.md` with a rationale link.
-
-## Writing rules
-
-- **Document current state.** Keep history in commits, PRs, or Agent Notes. Other prose names live mechanisms, not changes or stack positions.
-- **One physical line per paragraph**: use editor soft-wrap. Code blocks, tables, and list structure keep their formatting; code comments stay under the linter's column limit.
-- **Comments and JSDoc state complete contracts, not reasoning transcripts.** Preserve behavior, failure, timing, ownership, modality, exceptions, consequences, and non-obvious orientation; delete narration, test walkthroughs, review analysis, and code restatement. Keep the local contract and link its rationale. Use [the prose standard](../.agents/skills/dsh-prose-standard/SKILL.md) for details.
-- Write directly: name actors and facts. Name the exact check, type, API, operation, or behavior instead of metaphorical "gate", "vocabulary", or "surface".
-
-## The slop checklist
-
-Hunt these in any doc:
-
-- Duplicated rules: search a distinctive phrase; keep one home and link the rest.
-- History outside its permitted tier: state current facts and link the historical owner.
-- Implementation-status annotations in prose or diagrams ("implemented!", "future: …"). Status rots.
-- Hand-restated catalogs, JSDoc, or inventories of tests and status when source or a generator is authoritative.
-- Reasoning transcripts: step-by-step implementation narration, proof of obvious branches, test walkthroughs, or rejected local alternatives. Keep the resulting contract or durable rationale; delete the path used to derive it.
-- Rationale repeated beside sibling methods instead of once at the owning capability or helper.
-- Paragraph walls: one paragraph carrying several rules and parenthetical asides. Split it or demote the detail to its home.
-- Emphasis inflation: bold, CAPS, or "critically" everywhere means nothing stands out. Reserve emphasis for the clause that changes behavior.
-- Spec-speak in `implemented/` Agent Notes: "should", migration plans, acceptance checklists. An implemented Agent Note describes what is, per the [implemented-note instructions](../.agents/notes/implemented/AGENTS.md).
-
-## Repository references
-
-Use relative Markdown links for current files, never bare filenames or Agent Note numbers. Use tags or PR numbers for historical references.
+- Record only checks that actually ran.
+- Keep what prevents a likely mistake; drop narration, repeated background, and transcripts.
+- One physical line per paragraph. Link repository references with relative Markdown paths.
