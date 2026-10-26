@@ -490,6 +490,9 @@ class KitRegressionTests(unittest.TestCase):
                 "// Retries follow docs/specs/sync.md#retries.\n", encoding="utf-8"
             )
             (target / "docs" / "notes.md").write_text("Mentions `docs/specs/sync.md` in prose.\n", encoding="utf-8")
+            (target / "skill").mkdir()
+            (target / "skill" / "own.md").write_text("Read sync.md, this skill's own file.\n", encoding="utf-8")
+            (target / "skill" / "spec.md").write_text("Read specs/sync.md first.\n", encoding="utf-8")
             tasks = target / "docs" / "tasks"
             (tasks / "0001-done.md").write_text(
                 "# 0001: Done\n\n- Status: Done\n\nEdited `docs/specs/sync.md`.\n", encoding="utf-8"
@@ -505,6 +508,8 @@ class KitRegressionTests(unittest.TestCase):
             self.assertIn("    docs/notes.md:1\n", split.stdout)
             self.assertIn("    src/checks.ts:1\n", split.stdout)
             self.assertIn("    docs/tasks/0002-open.md:5\n", split.stdout)
+            self.assertIn("    skill/spec.md:1\n", split.stdout)
+            self.assertNotIn("skill/own.md", split.stdout)
             self.assertIn("leave mentions in finished records as written: docs/tasks/0001-done.md:5", split.stdout)
             moved = (specs / "sync" / "architecture.md").read_text(encoding="utf-8")
             self.assertIn("[storage](../storage.md#schema)", moved)
@@ -596,6 +601,98 @@ class KitRegressionTests(unittest.TestCase):
             self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
             self.assertIn("query.md#not-a-heading: docs/specs/query.md has no heading for #not-a-heading", failed.stderr)
             self.assertIn("#nowhere: docs/specs/store.md has no heading for #nowhere", failed.stderr)
+
+    def test_a_page_inside_a_node_may_take_over_a_path_the_node_declares(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.subsystem_repository(temporary)
+            root_map = target / "docs" / "architecture.md"
+            self.write_pages(root_map, {"sync/": "`src/sync/engine.ts`, `src/sync/conflict.ts`"}, regenerate=False)
+            self.write_pages(target / "docs" / "specs" / "sync" / "architecture.md", {"engine.md": "`src/sync/engine.ts`"})
+            checked = self.subsystem_check(target)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            owners = self.subsystem_check(target, "--owner", "src/sync/engine.ts", "src/sync/conflict.ts")
+            self.assertEqual(
+                owners.stdout.splitlines(),
+                [
+                    "src/sync/engine.ts -> docs/specs/sync/specs/engine.md",
+                    "src/sync/conflict.ts -> docs/specs/sync/architecture.md",
+                ],
+            )
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("| `src/sync/conflict.ts` | [sync](docs/specs/sync/architecture.md) |", agents)
+            self.assertIn("| `src/sync/engine.ts` | [sync/engine](docs/specs/sync/specs/engine.md) |", agents)
+
+            self.write_pages(root_map, {"storage.md": "`src/sync/engine.ts`"})
+            clashing = self.subsystem_check(target)
+            self.assertEqual(clashing.returncode, 1, clashing.stdout + clashing.stderr)
+            self.assertIn(
+                "src/sync/engine.ts is declared by both docs/specs/sync/specs/engine.md and docs/specs/storage.md",
+                clashing.stderr,
+            )
+
+    def test_move_carries_a_section_to_a_part_page_and_retargets_its_anchors(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.subsystem_repository(temporary)
+            specs = target / "docs" / "specs"
+            self.write_pages(
+                target / "docs" / "architecture.md",
+                {"sync/": "`src/sync/`", "storage.md": "`src/storage/`"},
+                regenerate=False,
+            )
+            node_map = specs / "sync" / "architecture.md"
+            node_map.write_text(
+                "# Sync\n\nSource: `src/sync/`\n\nSee [retries](#retries) and [notes](#notes).\n\n"
+                "## Retries\n\nBacks off; see [storage](../storage.md#schema) and [notes](#notes).\n\n"
+                "### Limits\n\nTen tries.\n\n## Notes\n\nShared.\n\n| Page | Role |\n|---|---|\n",
+                encoding="utf-8",
+            )
+            self.write_pages(node_map, {"conflicts.md": "`src/sync/conflict.ts`"})
+            (specs / "storage.md").write_text(
+                "# Storage\n\nSource: `src/storage/`\n\n## Schema\n\n"
+                "[retry](sync/architecture.md#retries) [limits](sync/architecture.md#limits) "
+                "[notes](sync/architecture.md#notes) `[x](sync/architecture.md#retries)`\n",
+                encoding="utf-8",
+            )
+            (target / "src" / "sync" / "engine.ts").write_text(
+                "// Spec: docs/specs/sync/architecture.md#retries.\n", encoding="utf-8"
+            )
+            (target / "docs" / "tasks" / "0001-done.md").write_text(
+                "# 0001: Done\n\n- Status: Done\n\nSee `docs/specs/sync/architecture.md#retries` "
+                "and [it](../specs/sync/architecture.md#retries).\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(self.subsystem_check(target, "--map").returncode, 0)
+            before = self.subsystem_check(target)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+
+            moved = self.subsystem_check(
+                target, "--move", "docs/specs/sync/architecture.md#retries", "docs/specs/sync/specs/conflicts.md"
+            )
+            self.assertEqual(moved.returncode, 0, moved.stdout + moved.stderr)
+            self.assertIn("moved #retries (7 lines, 2 heading(s))", moved.stdout)
+            self.assertTrue(
+                (specs / "sync" / "specs" / "conflicts.md").read_text(encoding="utf-8").endswith(
+                    "Scope.\n\n## Retries\n\nBacks off; see [storage](../../storage.md#schema) and "
+                    "[notes](../architecture.md#notes).\n\n### Limits\n\nTen tries.\n"
+                )
+            )
+            remaining = node_map.read_text(encoding="utf-8")
+            self.assertNotIn("## Retries", remaining)
+            self.assertIn("See [retries](specs/conflicts.md#retries) and [notes](#notes).\n\n## Notes", remaining)
+            self.assertIn(
+                "[retry](sync/specs/conflicts.md#retries) [limits](sync/specs/conflicts.md#limits) "
+                "[notes](sync/architecture.md#notes) `[x](sync/architecture.md#retries)`",
+                (specs / "storage.md").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                (target / "src" / "sync" / "engine.ts").read_text(encoding="utf-8"),
+                "// Spec: docs/specs/sync/specs/conflicts.md#retries.\n",
+            )
+            task = (target / "docs" / "tasks" / "0001-done.md").read_text(encoding="utf-8")
+            self.assertIn("See `docs/specs/sync/architecture.md#retries`", task)
+            self.assertIn("[it](../specs/sync/specs/conflicts.md#retries)", task)
+            after = self.subsystem_check(target)
+            self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
 
     def test_long_pages_and_maps_get_notes_without_failing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

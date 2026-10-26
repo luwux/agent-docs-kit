@@ -9,8 +9,9 @@ and its own `specs/` folder of pages, shaped like the root.
 Default mode checks structure only: each map's table lists every page of its
 node exactly once; each page starts with a `Source:` line (`Source: none` marks
 a cross-cutting page that owns no paths); each declared path or glob matches
-something and is declared once; every page inside a node declares only paths
-the node's `architecture.md` covers; and relative links in the spec tree
+something and is declared once, except that a page inside a node may repeat a
+path its node declares and then owns it; every page inside a node declares only
+paths the node's `architecture.md` covers; and relative links in the spec tree
 resolve inside the repository, with each `#anchor` naming a heading of its
 Markdown target. It does not prove that a page describes the code correctly.
 It also prints notes for pages and maps above their word guides; notes never
@@ -34,8 +35,14 @@ relative Markdown links to and from the page, and rewrites the page's
 repository path in non-Markdown files such as pointer comments. It then lists
 the remaining mentions of the page's file name, such as link text or a string a
 generator turns into links, apart from those in finished records (decisions,
-research, and tasks that are not open). The tree fails the default check until
-the node lists at least one page of its own.
+research, and tasks that are not open). A bare file name counts in code and in
+`docs/`; elsewhere a mention needs a folder that matches the page's path. The
+tree fails the default check until the node lists at least one page of its own.
+
+`--move PAGE#ANCHOR TARGET` moves the section under that heading, with its
+subsections, to the end of another Markdown file. It rewrites the section's
+relative links for its new folder, and every link and repository-path mention of
+the moved anchors, except plain text in finished records.
 
 `--refs PAGE` lists every Markdown link to a Markdown file and every mention of
 its repository path, grouped by `#anchor`, and marks anchors the file no longer
@@ -46,6 +53,7 @@ section move broke.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import functools
 import os
@@ -90,7 +98,9 @@ SOURCE_PATH = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"(\]\()([^)\s<>]+)((?:\s+\"[^\"]*\")?\))")
 INLINE_LINK = re.compile(r"!?\[([^\]]*)\]\(([^)\s<>]+)(?:\s+\"[^\"]*\")?\)")
 FENCE = re.compile(r"^\s*(```|~~~)")
-HEADING = re.compile(r"^ {0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$")
+HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
+# An anchor written after a path in prose ends before trailing sentence punctuation.
+ANCHOR_TEXT = r"[^\s)\]`'\"<>,;]*[^\s)\]`'\"<>,;.:!?]"
 ANCHOR_ATTRIBUTE = re.compile(r"<a\s[^>]*?\b(?:id|name)=[\"']([^\"']+)[\"']")
 TASK_STATUS = re.compile(r"^\W*Status:\s*(\w+)", re.IGNORECASE | re.MULTILINE)
 WORD =re.compile(r"[A-Za-z0-9_]+|[぀-ヿ㐀-鿿가-힯]")
@@ -206,27 +216,32 @@ def heading_slug(text: str) -> str:
     return "".join(kept).replace(" ", "-")
 
 
-@functools.lru_cache(maxsize=None)
-def anchors(path: Path) -> frozenset[str]:
-    """Return the anchors of a Markdown file: heading slugs, numbered on repeats, and `<a id>` names."""
+def headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """Return (line index, level, anchor) for each heading outside fenced code; repeated slugs get -1, -2."""
 
     counts: dict[str, int] = {}
-    found: set[str] = set()
+    found: list[tuple[int, int, str]] = []
     fenced = False
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for index, line in enumerate(lines):
         if FENCE.match(line):
             fenced = not fenced
             continue
-        if fenced:
-            continue
-        found.update(ANCHOR_ATTRIBUTE.findall(line))
-        match = HEADING.match(line)
+        match = None if fenced else HEADING.match(line)
         if match:
-            slug = heading_slug(match.group(1))
+            slug = heading_slug(match.group(2))
             count = counts.get(slug, 0)
-            found.add(slug if count == 0 else f"{slug}-{count}")
+            found.append((index, len(match.group(1)), slug if count == 0 else f"{slug}-{count}"))
             counts[slug] = count + 1
-    return frozenset(found)
+    return found
+
+
+@functools.lru_cache(maxsize=None)
+def anchors(path: Path) -> frozenset[str]:
+    """Return the anchors of a Markdown file: heading slugs and `<a id>` names."""
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    named = {name for line in lines for name in ANCHOR_ATTRIBUTE.findall(line)}
+    return frozenset(named | {anchor for _, _, anchor in headings(lines)})
 
 
 def has_anchor(path: Path, fragment: str) -> bool:
@@ -436,26 +451,37 @@ def load(errors: list[str]) -> tuple[dict[str, str], list[Page]]:
         return {}, []
     pages: list[Page] = []
     walk(ROOT_MAP, PAGES, None, pages, errors)
-    owners: dict[str, str] = {}
+    owners: dict[str, Page] = {}
+    # Pages arrive depth-first, so a node comes before the pages inside it.
     for page in pages:
         for source in page.sources:
             previous = owners.get(source)
-            if previous is not None and previous != page.key:
-                errors.append(f"ownership: {source} is declared by both {previous} and {page.key}")
+            if previous is not None and previous is not page and not is_ancestor(previous, page):
+                errors.append(f"ownership: {source} is declared by both {previous.key} and {page.key}")
                 continue
-            owners[source] = page.key
+            owners[source] = page
     check_containment(pages, errors)
     check_links(pages, errors)
-    return owners, pages
+    return {source: page.key for source, page in owners.items()}, pages
 
 
-def map_lines(pages: list[Page]) -> list[str]:
-    """Return the generated path-to-page table for the root AGENTS.md."""
+def is_ancestor(node: Page, page: Page) -> bool:
+    parent = page.parent
+    while parent is not None:
+        if parent is node:
+            return True
+        parent = parent.parent
+    return False
+
+
+def map_lines(pages: list[Page], owners: dict[str, str]) -> list[str]:
+    """Return the generated path-to-page table for the root AGENTS.md; a repeated path shows on its owner's row."""
 
     lines = ["| Paths | Page |", "|---|---|"]
     for page in pages:
-        if page.sources:
-            paths = ", ".join(f"`{source}`" for source in page.sources)
+        sources = [source for source in page.sources if owners.get(source) == page.key]
+        if sources:
+            paths = ", ".join(f"`{source}`" for source in sources)
             lines.append(f"| {paths} | [{page.label}]({page.key}) |")
     return lines
 
@@ -487,7 +513,7 @@ def map_block(lines: list[str]) -> tuple[int, int] | None:
     return starts[0], ends[0]
 
 
-def check_map(pages: list[Page], errors: list[str]) -> None:
+def check_map(pages: list[Page], owners: dict[str, str], errors: list[str]) -> None:
     if not AGENTS_FILE.is_file():
         return
     lines = AGENTS_FILE.read_text(encoding="utf-8").splitlines()
@@ -496,14 +522,14 @@ def check_map(pages: list[Page], errors: list[str]) -> None:
     except ValueError as error:
         errors.append(f"map: {error}")
         return
-    if block is not None and table_cells(lines[block[0] + 1 : block[1]]) != table_cells(map_lines(pages)):
+    if block is not None and table_cells(lines[block[0] + 1 : block[1]]) != table_cells(map_lines(pages, owners)):
         errors.append(
             f"map: {display(AGENTS_FILE)} subsystem table is stale; "
             f"run `python3 {display(Path(__file__).resolve())} --map`"
         )
 
 
-def write_map(pages: list[Page]) -> int:
+def write_map(pages: list[Page], owners: dict[str, str]) -> int:
     lines = AGENTS_FILE.read_text(encoding="utf-8").splitlines() if AGENTS_FILE.is_file() else []
     try:
         block = map_block(lines)
@@ -516,7 +542,7 @@ def write_map(pages: list[Page]) -> int:
             file=sys.stderr,
         )
         return 1
-    generated = map_lines(pages)
+    generated = map_lines(pages, owners)
     if table_cells(lines[block[0] + 1 : block[1]]) == table_cells(generated):
         print(f"verify_subsystem_pages: {display(AGENTS_FILE)} subsystem table is current.")
         return 0
@@ -560,8 +586,14 @@ def text_files(markdown: bool) -> list[Path]:
     return result
 
 
-def rewrite_links(text: str, old_base: Path, new_base: Path, moved_from: Path, moved_to: Path) -> tuple[str, int]:
-    """Rewrite relative link targets for a file read at old_base and stored at new_base."""
+def relink(
+    text: str, read_from: Path, written: Path, retarget: Callable[[Path, str], tuple[Path, str]]
+) -> tuple[str, int]:
+    """Rewrite relative links in text read from one file and stored in another, outside code.
+
+    retarget(file, "#fragment") returns where a link to that file and fragment now leads. A link
+    that still leads to the same place from the same folder keeps its spelling.
+    """
 
     lines = text.split("\n")
     count = 0
@@ -577,20 +609,28 @@ def rewrite_links(text: str, old_base: Path, new_base: Path, moved_from: Path, m
         for start, end in outside_code(line):
             for match in MARKDOWN_LINK.finditer(line, start, end):
                 target = match.group(2)
-                if not is_relative_target(target) or not split_target(target)[0]:
+                resolved = link_target(read_from, target)
+                if resolved is None:
                     continue
                 path, fragment = split_target(target)
-                resolved = resolve_link(old_base, target)
-                if resolved == moved_from:
-                    resolved = moved_to
-                elif old_base == new_base:
+                destination, new_fragment = retarget(resolved, fragment)
+                # A bare `#fragment` names the file it is stored in, so it changes when the text changes files.
+                if (
+                    (destination, new_fragment) == (resolved, fragment)
+                    and read_from.parent == written.parent
+                    and (read_from == written or not target.startswith("#"))
+                ):
                     continue
-                rewritten = os.path.relpath(resolved, new_base).replace(os.sep, "/")
-                if path.endswith("/") and not rewritten.endswith("/"):
-                    rewritten += "/"
-                if rewritten + fragment == target:
+                if destination == written and new_fragment:
+                    rewritten = new_fragment
+                else:
+                    rewritten = os.path.relpath(destination, written.parent).replace(os.sep, "/")
+                    if path.endswith("/") and not rewritten.endswith("/"):
+                        rewritten += "/"
+                    rewritten += new_fragment
+                if rewritten == target:
                     continue
-                pieces.append(line[cursor : match.start(2)] + rewritten + fragment)
+                pieces.append(line[cursor : match.start(2)] + rewritten)
                 cursor = match.end(2)
                 count += 1
         if pieces:
@@ -617,15 +657,16 @@ def split_page(raw: str, pages: list[Page]) -> int:
     others = [path for path in text_files(markdown=False)]
     link_count = link_files = 0
     rewritten: dict[Path, str] = {}
+
+    def retarget(file: Path, fragment: str) -> tuple[Path, str]:
+        return (new if file == old else file), fragment
+
     for path in markdown:
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if path == old:
-            updated, count = rewrite_links(text, old.parent, new.parent, old, new)
-        else:
-            updated, count = rewrite_links(text, path.parent, path.parent, old, new)
+        updated, count = relink(text, path, new if path == old else path, retarget)
         if count:
             rewritten[path] = updated
             link_count += count
@@ -688,17 +729,27 @@ def mentions_page(line: str, path: Path, old: Path, new: Path) -> bool:
 
     `cli.md` and `specs/cli.md` name `docs/specs/cli.md`; `skill/cli.md` names another file. A
     link's text counts only when the link leads to the page, so `[cli.md](cli.md)` beside another
-    `cli.md` does not.
+    `cli.md` does not. A bare `cli.md` in prose counts only in code and in `docs/`, because
+    Markdown elsewhere, such as a skill or an eval log, often names its own files that way.
     """
 
-    line = INLINE_LINK.sub(
-        lambda match: match.group(1) if link_target(path, match.group(2)) in {old, new} else "", line
-    )
     key, name = display(old), old.name
+    named = re.compile(r"(?<![\w-])" + re.escape(name) + r"\b")
+    link_texts: list[str] = []
+
+    def drop_link(match: re.Match[str]) -> str:
+        if link_target(path, match.group(2)) in {old, new}:
+            link_texts.append(match.group(1))
+        return ""
+
+    line = INLINE_LINK.sub(drop_link, line)
+    if any(named.search(text) for text in link_texts):
+        return True
+    bare = path.suffix not in {".md", ".mdx"} or DOCS in path.parents
     for match in re.finditer(r"(?<![\w./-])((?:[\w.-]+/)*)" + re.escape(name) + r"\b", line):
         folders = [part for part in match.group(1).split("/") if part not in {"", ".", ".."}]
         mentioned = "/".join([*folders, name])
-        if key == mentioned or key.endswith("/" + mentioned):
+        if (folders or bare) and (key == mentioned or key.endswith("/" + mentioned)):
             return True
     return False
 
@@ -722,8 +773,7 @@ def references(target: Path) -> list[tuple[str, int, str]]:
     """Return (file, line, anchor) for each Markdown link to target and each mention of its repository path."""
 
     key = display(target)
-    # An anchor in prose ends before trailing sentence punctuation.
-    mention = re.compile(re.escape(key) + r"(?:#([^\s)\]`'\"<>,;]*[^\s)\]`'\"<>,;.:!?]))?")
+    mention = re.compile(re.escape(key) + f"(?:#({ANCHOR_TEXT}))?")
     found: set[tuple[str, int, str]] = set()
     for path in text_files(markdown=True) + text_files(markdown=False):
         try:
@@ -759,6 +809,105 @@ def print_references(raw: str) -> int:
         print(f"  {label}{' — no such heading' if absent else ''} ({len(places)}): {', '.join(places)}")
     if missing:
         print("Point each reference marked `no such heading` at the page that now holds the section.")
+    return 0
+
+
+def move_section(raw: str, raw_target: str) -> int:
+    """Move the section under a heading to the end of another file and retarget references to it."""
+
+    raw_source, _, wanted = raw.partition("#")
+    source = REPOSITORY / repository_relative(raw_source)
+    target = REPOSITORY / repository_relative(raw_target)
+    for path in (source, target):
+        if path.suffix not in {".md", ".mdx"} or not path.is_file():
+            print(
+                f"verify_subsystem_pages: {display(path)} is not a Markdown file; create a page with its "
+                "title and Source line and list it in its node's map first",
+                file=sys.stderr,
+            )
+            return 2
+    if not wanted or source == target:
+        print("verify_subsystem_pages: --move takes PAGE#ANCHOR and a different TARGET", file=sys.stderr)
+        return 2
+    lines = source.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    found = headings(lines)
+    wanted = unquote(wanted)
+    heading = next((entry for entry in found if entry[2] in {wanted, wanted.lower()}), None)
+    if heading is None:
+        print(f"verify_subsystem_pages: {display(source)} has no heading for #{wanted}", file=sys.stderr)
+        return 2
+    start, level, _ = heading
+    end = next((index for index, depth, _ in found if index > start and depth <= level), len(lines))
+    section, rest = lines[start:end], lines[:start] + lines[end:]
+    while section and not section[-1].strip():
+        section.pop()
+    base = target.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    offset = len(base) + 1
+
+    # Map each anchor by position, so repeated headings that renumber are followed too.
+    moved = dict(
+        zip(
+            [anchor for index, _, anchor in found if start <= index < end],
+            [anchor for index, _, anchor in headings(base + [""] + section) if index >= offset],
+        )
+    )
+    renumbered = {
+        old: new
+        for old, new in zip([anchor for index, _, anchor in found if not start <= index < end], [a for _, _, a in headings(rest)])
+        if old != new
+    }
+
+    def retarget(file: Path, fragment: str) -> tuple[Path, str]:
+        if file != source or not fragment:
+            return file, fragment
+        name = unquote(fragment[1:])
+        for table, destination in ((moved, target), (renumbered, source)):
+            for candidate in (name, name.lower()):
+                if candidate in table:
+                    return destination, "#" + table[candidate]
+        return file, fragment
+
+    mention = re.compile(re.escape(display(source)) + f"#({ANCHOR_TEXT})")
+
+    mention_count = 0
+
+    def rename(match: re.Match[str]) -> str:
+        nonlocal mention_count
+        destination, fragment = retarget(source, "#" + match.group(1))
+        mention_count += (destination, fragment) != (source, "#" + match.group(1))
+        return display(destination) + fragment
+
+    updates: dict[Path, str] = {}
+    moved_text, link_count = relink("\n".join(section), source, target, retarget)
+    others = [path for path in text_files(markdown=True) + text_files(markdown=False) if path not in {source, target}]
+    for path in [source, target, *others]:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if path == source:
+            text = "\n".join(rest).rstrip("\n") + "\n"
+        if path.suffix in {".md", ".mdx"}:
+            text, count = relink(text, path, path, retarget)
+            link_count += count
+        if path == target:
+            text = text.rstrip("\n") + "\n\n" + moved_text + "\n"
+        if not (path.suffix in {".md", ".mdx"} and is_finished_record(path)):
+            text = mention.sub(rename, text)
+        if path in {source, target} or text != path.read_text(encoding="utf-8"):
+            updates[path] = text
+    for path, text in updates.items():
+        path.write_text(text, encoding="utf-8")
+
+    print(
+        f"verify_subsystem_pages: moved #{heading[2]} ({len(section)} lines, {len(moved)} heading(s)) "
+        f"from {display(source)} to the end of {display(target)}"
+    )
+    print(f"  rewrote {link_count} link(s) and {mention_count} path mention(s) in {len(updates)} file(s)")
+    print(
+        f"next: fit the section's heading level to {display(target)}. Renaming or removing a moved heading "
+        f"changes its anchor; `--refs {display(target)}` then lists the references to fix."
+    )
     return 0
 
 
@@ -897,6 +1046,12 @@ def parser() -> argparse.ArgumentParser:
     )
     mode.add_argument("--split", metavar="PAGE", help="turn a single page into a node")
     mode.add_argument("--refs", metavar="PAGE", help="list links and path mentions of a page by anchor")
+    mode.add_argument(
+        "--move",
+        nargs=2,
+        metavar=("PAGE#ANCHOR", "TARGET"),
+        help="move a section to the end of another page and retarget references to it",
+    )
     return result
 
 
@@ -904,10 +1059,12 @@ def main() -> int:
     args = parser().parse_args()
     if args.refs:
         return print_references(args.refs)
+    if args.move:
+        return move_section(*args.move)
     errors: list[str] = []
     owners, pages = load(errors)
     if not errors and not args.map:
-        check_map(pages, errors)
+        check_map(pages, owners, errors)
     if errors:
         print("verify_subsystem_pages: violations found:", file=sys.stderr)
         for error in errors:
@@ -916,7 +1073,7 @@ def main() -> int:
         return 1
 
     if args.map:
-        return write_map(pages)
+        return write_map(pages, owners)
 
     if args.split:
         return split_page(args.split, pages)
