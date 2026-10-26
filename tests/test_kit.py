@@ -24,6 +24,20 @@ def run(*args: object, cwd: Path | None = None) -> subprocess.CompletedProcess[s
     )
 
 
+COMMIT = (
+    "git",
+    "-c",
+    "user.name=Docs Kit Test",
+    "-c",
+    "user.email=docs-kit@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--quiet",
+    "-m",
+)
+
+
 class KitRegressionTests(unittest.TestCase):
     def install(
         self,
@@ -55,7 +69,7 @@ class KitRegressionTests(unittest.TestCase):
             self.assertEqual(list(target.iterdir()), [])
 
             installed = self.install(target)
-            self.assertIn("created 8 files", installed.stdout)
+            self.assertIn("created 7 files", installed.stdout)
             self.assertEqual(
                 sorted(
                     path.relative_to(target).as_posix()
@@ -68,7 +82,6 @@ class KitRegressionTests(unittest.TestCase):
                     "docs/architecture.md",
                     "docs/decisions/TEMPLATE.md",
                     "docs/product.md",
-                    "docs/specs/README.md",
                     "docs/tasks/TEMPLATE.md",
                     "scripts/verify_subsystem_pages.py",
                 ],
@@ -82,7 +95,7 @@ class KitRegressionTests(unittest.TestCase):
             target.mkdir()
 
             installed = self.install(target, INIT, "--claude-symlinks")
-            self.assertIn("created 10 files", installed.stdout)
+            self.assertIn("created 9 files", installed.stdout)
             for link in ("CLAUDE.md", "docs/CLAUDE.md"):
                 self.assertEqual(os.readlink(target / link), "AGENTS.md", link)
                 self.assertTrue((target / link).is_file(), link)
@@ -122,7 +135,7 @@ class KitRegressionTests(unittest.TestCase):
             target.mkdir()
 
             result = self.install(target, copied_kit / "init.py")
-            self.assertIn("created 8 files", result.stdout)
+            self.assertIn("created 7 files", result.stdout)
             for path in junk:
                 relative = path.relative_to(template)
                 self.assertNotIn(relative.name, result.stdout)
@@ -191,6 +204,7 @@ class KitRegressionTests(unittest.TestCase):
         for path, content in {
             "src/sync/engine.ts": "engine\n",
             "src/sync/conflict.ts": "conflict\n",
+            "src/sync/transport/socket.ts": "socket\n",
             "src/storage/schema.ts": "schema\n",
             "publish/src/render-page.ts": "render\n",
             "publish/src/cli.ts": "cli\n",
@@ -198,35 +212,35 @@ class KitRegressionTests(unittest.TestCase):
         }.items():
             (target / path).parent.mkdir(parents=True, exist_ok=True)
             (target / path).write_text(content, encoding="utf-8")
-        for command in (
-            ("git", "init", "--quiet"),
-            ("git", "add", "."),
-            (
-                "git",
-                "-c",
-                "user.name=Docs Kit Test",
-                "-c",
-                "user.email=docs-kit@example.invalid",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "--quiet",
-                "-m",
-                "fixture",
-            ),
-        ):
+        for command in (("git", "init", "--quiet"), ("git", "add", "."), COMMIT + ("fixture",)):
             result = run(*command, cwd=target)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return target
 
-    def write_pages(self, pages: Path, pages_by_name: dict[str, str]) -> None:
-        index = pages / "README.md"
-        rows = "".join(f"| [{name}]({name}) | {name} |\n" for name in pages_by_name)
-        index.write_text(index.read_text(encoding="utf-8") + rows, encoding="utf-8")
+    def write_pages(self, node_map: Path, pages_by_name: dict[str, str], regenerate: bool = True) -> None:
+        """Add pages to the node whose map is node_map; a name ending in `/` becomes a node."""
+
+        pages = node_map.parent / "specs"
+        pages.mkdir(exist_ok=True)
+        rows = ""
         for name, source in pages_by_name.items():
-            (pages / name).write_text(f"# {name}\n\nSource: {source}\n\nScope.\n", encoding="utf-8")
-        # Keep the generated AGENTS.md table current; structural failures surface in the caller's check.
-        self.subsystem_check(pages.parent.parent, "--map")
+            if name.endswith("/"):
+                path = pages / name / "architecture.md"
+                path.parent.mkdir()
+                rows += f"| [{name[:-1]}](specs/{name}architecture.md) | part |\n"
+            else:
+                path = pages / name
+                rows += f"| [{name}](specs/{name}) | part |\n"
+            path.write_text(f"# {name}\n\nSource: {source}\n\nScope.\n", encoding="utf-8")
+        node_map.write_text(node_map.read_text(encoding="utf-8") + rows, encoding="utf-8")
+        if regenerate:
+            # Keep the generated AGENTS.md table current; structural failures surface in the caller's check.
+            self.subsystem_check(self.repository_of(node_map), "--map")
+
+    def repository_of(self, path: Path) -> Path:
+        while not (path / "AGENTS.md").is_file() or not (path / "scripts").is_dir():
+            path = path.parent
+        return path
 
     def subsystem_check(self, target: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return run(
@@ -248,7 +262,7 @@ class KitRegressionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             target = self.subsystem_repository(temporary)
             self.write_pages(
-                target / "docs" / "specs",
+                target / "docs" / "architecture.md",
                 {
                     "sync.md": "`src/`",
                     "conflicts.md": "`src/sync/conflict.ts`",
@@ -257,7 +271,8 @@ class KitRegressionTests(unittest.TestCase):
                     "privacy.md": "none",
                 },
             )
-            self.assertEqual(self.subsystem_check(target).returncode, 0)
+            checked = self.subsystem_check(target)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
             result = self.subsystem_check(
                 target,
                 "--owner",
@@ -279,16 +294,84 @@ class KitRegressionTests(unittest.TestCase):
                 ],
             )
 
-    def test_bracketed_existing_path_is_literal_and_dot_slash_index_links_resolve(self) -> None:
+    def test_nested_node_owns_leftovers_and_its_pages_own_their_parts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.subsystem_repository(temporary)
-            pages = target / "docs" / "specs"
-            index = pages / "README.md"
-            index.write_text(
-                index.read_text(encoding="utf-8") + "| [media](./media.md) | media |\n",
-                encoding="utf-8",
+            self.write_pages(target / "docs" / "architecture.md", {"sync/": "`src/sync/`"}, regenerate=False)
+            node = target / "docs" / "specs" / "sync"
+            self.write_pages(node / "architecture.md", {"conflicts.md": "`src/sync/conflict.ts`"}, regenerate=False)
+            self.write_pages(node / "architecture.md", {"transport/": "`src/sync/transport/`"}, regenerate=False)
+            self.write_pages(
+                node / "specs" / "transport" / "architecture.md", {"socket.md": "`src/sync/transport/socket.ts`"}
             )
-            (pages / "media.md").write_text(
+            checked = self.subsystem_check(target)
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            self.assertIn("2 of them node(s)", checked.stdout)
+            owners = self.subsystem_check(
+                target, "--owner", "src/sync/engine.ts", "src/sync/conflict.ts", "src/sync/transport/socket.ts"
+            )
+            self.assertEqual(
+                owners.stdout.splitlines(),
+                [
+                    "src/sync/engine.ts -> docs/specs/sync/architecture.md",
+                    "src/sync/conflict.ts -> docs/specs/sync/specs/conflicts.md",
+                    "src/sync/transport/socket.ts -> docs/specs/sync/specs/transport/specs/socket.md",
+                ],
+            )
+            agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+            for row in (
+                "| `src/sync/` | [sync](docs/specs/sync/architecture.md) |",
+                "| `src/sync/conflict.ts` | [sync/conflicts](docs/specs/sync/specs/conflicts.md) |",
+                "| `src/sync/transport/` | [sync/transport](docs/specs/sync/specs/transport/architecture.md) |",
+                "| `src/sync/transport/socket.ts` | [sync/transport/socket](docs/specs/sync/specs/transport/specs/socket.md) |",
+            ):
+                self.assertIn(row, agents)
+
+    def test_nested_node_rejects_paths_outside_it_and_incomplete_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.subsystem_repository(temporary)
+            self.write_pages(
+                target / "docs" / "architecture.md",
+                {"sync/": "`src/sync/`", "empty/": "`src/storage/`", "bare/": "none"},
+                regenerate=False,
+            )
+            specs = target / "docs" / "specs"
+            self.write_pages(specs / "sync" / "architecture.md", {"render.md": "`publish/src/render-page.ts`"}, regenerate=False)
+            (specs / "sync" / "tasks").mkdir()
+            (specs / "empty" / "specs").mkdir()
+            (specs / "sync" / "specs" / "unlisted.md").write_text(
+                "# Unlisted\n\nSource: `src/sync/engine.ts`\n", encoding="utf-8"
+            )
+            result = self.subsystem_check(target)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            for expected in (
+                "docs/specs/sync/specs/render.md declares paths outside its node docs/specs/sync/architecture.md: publish/src/render-page.ts",
+                "docs/specs/sync/tasks — a node holds only architecture.md and specs/",
+                "docs/specs/empty/specs/ — the node has no pages",
+                "docs/specs/bare/specs/ — a node needs a specs/ folder",
+                "docs/specs/sync/specs/unlisted.md — page is missing from the table in docs/specs/sync/architecture.md",
+            ):
+                self.assertIn(expected, result.stderr)
+
+    def test_legacy_index_and_map_inside_the_pages_folder_are_named(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.subsystem_repository(temporary)
+            specs = target / "docs" / "specs"
+            specs.mkdir()
+            (specs / "README.md").write_text("# Specs\n", encoding="utf-8")
+            (specs / "architecture.md").write_text("# Architecture\n", encoding="utf-8")
+            result = self.subsystem_check(target)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("docs/specs/README.md — the index lives in docs/architecture.md", result.stderr)
+            self.assertIn("docs/specs/architecture.md — move the root map to docs/architecture.md", result.stderr)
+
+    def test_bracketed_existing_path_is_literal_and_dot_slash_map_links_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.subsystem_repository(temporary)
+            root = target / "docs" / "architecture.md"
+            root.write_text(root.read_text(encoding="utf-8") + "| [media](./specs/media.md) | media |\n", encoding="utf-8")
+            (target / "docs" / "specs").mkdir()
+            (target / "docs" / "specs" / "media.md").write_text(
                 "# Media\n\nSource: `app/media/[...key]/`\n", encoding="utf-8"
             )
             self.subsystem_check(target, "--map")
@@ -299,24 +382,17 @@ class KitRegressionTests(unittest.TestCase):
             checked = self.subsystem_check(target)
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
             result = self.subsystem_check(target, "--owner", "app/media/[...key]/route.ts")
-            self.assertEqual(
-                result.stdout.strip(), "app/media/[...key]/route.ts -> docs/specs/media.md"
-            )
+            self.assertEqual(result.stdout.strip(), "app/media/[...key]/route.ts -> docs/specs/media.md")
 
     def test_agents_map_is_generated_and_stale_tables_fail(self) -> None:
-        page_root = "docs/specs"
         with tempfile.TemporaryDirectory() as temporary:
             target = self.subsystem_repository(temporary)
-            self.write_pages(target / page_root, {"sync.md": "`src/sync/`, `src/storage/schema.ts`"})
+            self.write_pages(target / "docs" / "architecture.md", {"sync.md": "`src/sync/`, `src/storage/schema.ts`"})
             agents = (target / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn(
-                f"| `src/sync/`, `src/storage/schema.ts` | [sync]({page_root}/sync.md) |", agents
-            )
+            self.assertIn("| `src/sync/`, `src/storage/schema.ts` | [sync](docs/specs/sync.md) |", agents)
             self.assertEqual(self.subsystem_check(target).returncode, 0)
 
-            (target / page_root / "sync.md").write_text(
-                "# sync.md\n\nSource: `src/sync/`\n", encoding="utf-8"
-            )
+            (target / "docs" / "specs" / "sync.md").write_text("# sync.md\n\nSource: `src/sync/`\n", encoding="utf-8")
             stale = self.subsystem_check(target)
             self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
             self.assertIn("subsystem table is stale", stale.stderr)
@@ -336,13 +412,8 @@ class KitRegressionTests(unittest.TestCase):
     def test_pointers_lists_pages_no_owned_file_names(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.subsystem_repository(temporary)
-            self.write_pages(
-                target / "docs" / "specs",
-                {"sync.md": "`src/sync/`", "storage.md": "`src/storage/`"},
-            )
-            (target / "src" / "sync" / "engine.ts").write_text(
-                "// Contract: docs/specs/sync.md\n", encoding="utf-8"
-            )
+            self.write_pages(target / "docs" / "architecture.md", {"sync.md": "`src/sync/`", "storage.md": "`src/storage/`"})
+            (target / "src" / "sync" / "engine.ts").write_text("// Spec: docs/specs/sync.md\n", encoding="utf-8")
             # A README link inside owned paths is not a pointer for agents that start from code.
             (target / "src" / "storage" / "README.md").write_text(
                 "See [storage](../../docs/specs/storage.md).\n", encoding="utf-8"
@@ -355,22 +426,23 @@ class KitRegressionTests(unittest.TestCase):
     def test_subsystem_verifier_rejects_inconsistent_pages(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.subsystem_repository(temporary)
-            pages = target / "docs" / "specs"
             self.write_pages(
-                pages,
+                target / "docs" / "architecture.md",
                 {
                     "sync.md": "`src/sync/`, `src/missing/`, `src/sync/engine.ts/`",
                     "storage.md": "`src/sync/`, `src/*.none`",
                 },
             )
-            (pages / "orphan.md").write_text("# Orphan\n\nNo source line.\n", encoding="utf-8")
-            (pages / "nested").mkdir()
+            specs = target / "docs" / "specs"
+            (specs / "orphan.md").write_text("# Orphan\n\nNo source line. See [gone](gone.md).\n", encoding="utf-8")
+            (specs / "notes.txt").write_text("stray\n", encoding="utf-8")
             result = self.subsystem_check(target)
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
             for expected in (
-                "keep docs/specs/ flat",
-                "docs/specs/orphan.md — page is missing from README.md",
+                "docs/specs/notes.txt — only Markdown pages and node folders are allowed",
+                "docs/specs/orphan.md — page is missing from the table in docs/architecture.md",
                 "orphan.md:3 — first line after the title must be",
+                "docs/specs/orphan.md:3 — gone.md does not exist",
                 "src/missing/ does not exist",
                 "src/sync/engine.ts/: directories end with `/`, files do not",
                 "glob src/*.none matches no file",
@@ -381,58 +453,75 @@ class KitRegressionTests(unittest.TestCase):
     def test_subsystem_changed_lists_pages_whose_code_moved_alone(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.subsystem_repository(temporary)
-            pages = target / "docs" / "specs"
-            self.write_pages(pages, {"sync.md": "`src/sync/`", "storage.md": "`src/storage/`"})
-            for command in (
-                ("git", "add", "."),
-                (
-                    "git",
-                    "-c",
-                    "user.name=Docs Kit Test",
-                    "-c",
-                    "user.email=docs-kit@example.invalid",
-                    "-c",
-                    "commit.gpgsign=false",
-                    "commit",
-                    "--quiet",
-                    "-m",
-                    "pages",
-                ),
-            ):
+            self.write_pages(target / "docs" / "architecture.md", {"sync.md": "`src/sync/`", "storage.md": "`src/storage/`"})
+            for command in (("git", "add", "."), COMMIT + ("pages",)):
                 self.assertEqual(run(*command, cwd=target).returncode, 0)
             (target / "src" / "sync" / "engine.ts").write_text("changed\n", encoding="utf-8")
             (target / "src" / "sync" / "new.ts").write_text("untracked\n", encoding="utf-8")
             (target / "src" / "storage" / "schema.ts").write_text("changed\n", encoding="utf-8")
-            with (pages / "storage.md").open("a", encoding="utf-8") as page:
+            with (target / "docs" / "specs" / "storage.md").open("a", encoding="utf-8") as page:
                 page.write("Updated with its code.\n")
             result = self.subsystem_check(target, "--changed")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn(
-                "docs/specs/sync.md: src/sync/engine.ts, src/sync/new.ts", result.stdout
-            )
+            self.assertIn("docs/specs/sync.md: src/sync/engine.ts, src/sync/new.ts", result.stdout)
             self.assertNotIn("docs/specs/storage.md:", result.stdout)
 
-    def test_non_subsystem_pages_setting_exempts_a_map_in_the_pages_folder(self) -> None:
+    def test_split_turns_a_page_into_a_node_and_rewrites_references(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.subsystem_repository(temporary)
-            pages = target / "docs" / "specs"
-            self.write_pages(pages, {"sync.md": "`src/sync/`"})
-            (pages / "architecture.md").write_text("# Architecture\n\nThe map.\n", encoding="utf-8")
-            rejected = self.subsystem_check(target)
-            self.assertEqual(rejected.returncode, 1, rejected.stdout + rejected.stderr)
-
-            script = target / "scripts" / "verify_subsystem_pages.py"
-            script.write_text(
-                script.read_text(encoding="utf-8").replace(
-                    "NON_SUBSYSTEM_PAGES: set[str] = set()",
-                    'NON_SUBSYSTEM_PAGES: set[str] = {"architecture.md"}',
-                ),
+            self.write_pages(target / "docs" / "architecture.md", {"sync.md": "`src/sync/`", "storage.md": "`src/storage/`"})
+            specs = target / "docs" / "specs"
+            (specs / "sync.md").write_text(
+                "# Sync\n\nSource: `src/sync/`\n\nStores via [storage](storage.md#schema); "
+                "code in [engine](../../src/sync/engine.ts); see [below](#retries) and `[not a link](x.md)`.\n",
                 encoding="utf-8",
             )
-            accepted = self.subsystem_check(target)
-            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
-            result = self.subsystem_check(target, "--owner", "src/sync/engine.ts")
-            self.assertEqual(result.stdout.strip(), "src/sync/engine.ts -> docs/specs/sync.md")
+            (specs / "storage.md").write_text(
+                "# Storage\n\nSource: `src/storage/`\n\nSynced by [sync](sync.md#retries).\n", encoding="utf-8"
+            )
+            (target / "src" / "sync" / "engine.ts").write_text("// Spec: docs/specs/sync.md\n", encoding="utf-8")
+            (target / "docs" / "notes.md").write_text("Mentions `docs/specs/sync.md` in prose.\n", encoding="utf-8")
+            self.assertEqual(self.subsystem_check(target).returncode, 0)
+
+            split = self.subsystem_check(target, "--split", "docs/specs/sync.md")
+            self.assertEqual(split.returncode, 0, split.stdout + split.stderr)
+            self.assertIn("moved docs/specs/sync.md -> docs/specs/sync/architecture.md", split.stdout)
+            mentions = next(line for line in split.stdout.splitlines() if "review plain-text mentions" in line)
+            self.assertIn("docs/notes.md", mentions)
+            moved = (specs / "sync" / "architecture.md").read_text(encoding="utf-8")
+            self.assertIn("[storage](../storage.md#schema)", moved)
+            self.assertIn("[engine](../../../src/sync/engine.ts)", moved)
+            self.assertIn("[below](#retries)", moved)
+            self.assertIn("`[not a link](x.md)`", moved)
+            self.assertIn("[sync](sync/architecture.md#retries)", (specs / "storage.md").read_text(encoding="utf-8"))
+            self.assertIn(
+                "(specs/sync/architecture.md)", (target / "docs" / "architecture.md").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                (target / "src" / "sync" / "engine.ts").read_text(encoding="utf-8"),
+                "// Spec: docs/specs/sync/architecture.md\n",
+            )
+            self.assertTrue((specs / "sync" / "specs").is_dir())
+
+            unfinished = self.subsystem_check(target)
+            self.assertEqual(unfinished.returncode, 1, unfinished.stdout + unfinished.stderr)
+            self.assertIn("the node has no pages", unfinished.stderr)
+            self.write_pages(specs / "sync" / "architecture.md", {"conflicts.md": "`src/sync/conflict.ts`"})
+            finished = self.subsystem_check(target)
+            self.assertEqual(finished.returncode, 0, finished.stdout + finished.stderr)
+
+    def test_long_pages_and_maps_get_notes_without_failing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.subsystem_repository(temporary)
+            self.write_pages(target / "docs" / "architecture.md", {"sync.md": "`src/sync/`", "storage.md": "`src/storage/`"})
+            with (target / "docs" / "specs" / "sync.md").open("a", encoding="utf-8") as page:
+                page.write("word " * 4100 + "\n")
+            with (target / "docs" / "specs" / "storage.md").open("a", encoding="utf-8") as page:
+                page.write("字" * 3000 + "\n")
+            result = self.subsystem_check(target)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("note: docs/specs/sync.md has", result.stdout)
+            self.assertNotIn("note: docs/specs/storage.md", result.stdout)
 
 
 if __name__ == "__main__":

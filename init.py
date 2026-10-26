@@ -19,14 +19,13 @@ PAYLOAD = (
     "docs/architecture.md",
     "docs/decisions/TEMPLATE.md",
     "docs/product.md",
-    "docs/specs/README.md",
     "docs/tasks/TEMPLATE.md",
     "scripts/verify_subsystem_pages.py",
 )
 CLAUDE_LINKS = ("CLAUDE.md", "docs/CLAUDE.md")
 NEXT_STEP = (
-    "record docs/architecture.md, docs/product.md, and one spec per subsystem in docs/specs/, "
-    "then run python3 scripts/verify_subsystem_pages.py --map"
+    "record docs/architecture.md, docs/product.md, and one page per subsystem in docs/specs/ "
+    "listed in the architecture table, then run python3 scripts/verify_subsystem_pages.py --map"
 )
 # Platform metadata that editors and interpreters drop into the kit checkout.
 IGNORED_TEMPLATE_NAMES = {".DS_Store", "Thumbs.db"}

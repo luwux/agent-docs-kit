@@ -6,8 +6,8 @@ This file applies to `docs/` alongside the root `AGENTS.md`.
 
 | Location | Holds | Changes |
 | --- | --- | --- |
-| [architecture.md](architecture.md) | The map: how subsystems compose, flows that cross them, one entry per subsystem | With the code |
-| [specs/](specs/README.md) | One page per subsystem: current behavior and known limitations | With the code, in the same change |
+| [architecture.md](architecture.md) | The root map: how subsystems compose, flows that cross them, shared rules, and the table of root pages | With the code |
+| `specs/` | One page per subsystem: current behavior and known limitations. A page with parts grows into a node (see [Specs](#specs)) | With the code, in the same change |
 | [product.md](product.md) | Scope, goals, non-goals, and direction | When the direction changes |
 | `decisions/NNNN-title.md` | Why a durable choice was made | Not after acceptance; a reversal is a new decision |
 | `tasks/NNNN-title.md` | Bounded work: goal, scope, constraints, acceptance, result | While open; frozen once done or dropped |
@@ -16,9 +16,30 @@ This file applies to `docs/` alongside the root `AGENTS.md`.
 
 ## Rules
 
-1. Current-state documents (architecture, specs, and topic documents) describe what exists now. Replace a stale statement in place; do not append history or name the change that introduced a behavior.
+1. Current-state documents (architecture maps, specs, and topic documents) describe what exists now. Replace a stale statement in place; do not append history or name the change that introduced a behavior.
 2. Each fact has one home; link to it elsewhere. A local contract may repeat an essential behavior, failure, or ownership fact where it is used.
 3. Current-state documents never list unbuilt behavior. Planned work lives in a task, the direction in [product.md](product.md), and the reason for a choice in a decision. When work ships, its behavior moves into the spec.
+
+## Specs
+
+A spec describes one subsystem as built. A subsystem is a single page until it has parts; then it becomes a node, a folder shaped like `docs/` itself, so a node can split again.
+
+- **Page:** `specs/<name>.md`, named in kebab-case. The first line after the title is `Source:` followed by the backticked repository paths the page owns, for example ``Source: `src/sync/`, `src/storage/schema.ts`, `publish/src/render-*.ts` ``. A directory path ends with `/`; in a glob, `*` stays within one path segment and `**` crosses segments; a path that exists on disk is literal even when it contains `[`, `*`, or `?`, such as `app/media/[...key]/`. Each path is declared once. A cross-cutting page that owns no code, such as privacy rules that span subsystems, writes `Source: none`.
+- **Node:** `specs/<name>/` holds only `architecture.md` and its own `specs/` folder. Its `architecture.md` is the subsystem's page and its map: a `Source:` line covering every path of the subsystem, then the scope, the interface other subsystems rely on, a table linking each page in its `specs/` with its role, the flows between those pages, and the rules and limitations they share. Decisions, tasks, and research stay in the root `docs/`.
+- **Root:** [architecture.md](architecture.md) is the root node's map: the same content without a `Source:` line.
+- **Ownership:** every page in a node declares only paths inside the node's `Source:`. The most specific declaration owns a file: a file over a glob, a glob over a directory, a deeper directory over its parent. Files no page of a node claims belong to the node's `architecture.md`.
+- **Maps:** each map's table lists every page of its node once, with the link in the first cell: `specs/<name>.md` or `specs/<name>/architecture.md`.
+- **Content:** open with one scope paragraph: what the subsystem owns, which subsystems it calls or is called by (linked), and what it does not own. Then document what applies: data and types, behavior and lifecycle, failure and recovery, configuration, extension points, known limitations, and the checks to run after changing it. Link the authoritative code instead of restating it. Flows between sibling pages belong in their node's map.
+- **Pointers:** one entry file of each owned directory, such as the package comment, the main type, or the `index` module, carries one comment naming its page by repository path, for example `// Spec: docs/specs/sync.md`. Files that cannot hold comments, such as JSON, need none.
+- **Check:** `python3 scripts/verify_subsystem_pages.py` checks the tree, its links, and the generated table in the root `AGENTS.md`, and prints notes for pages over about 4,000 words and maps over about 2,500. `--map` regenerates the table after a `Source:` line changes; `--owner <path>` names a path's page; `--changed [BASE]` lists pages whose owned paths changed while the page did not; `--pointers` lists pages that no owned file names.
+
+### Splitting a page
+
+Split a page when both hold: it exceeds about 4,000 words, and its content falls into at least three parts that own different files and are edited independently. A long page about one tightly coupled part is condensed instead: dated measurements move to research and rationale to a decision.
+
+- Parts of one subsystem become a node. `python3 scripts/verify_subsystem_pages.py --split docs/specs/<name>.md` moves the page to `specs/<name>/architecture.md` and rewrites links and pointer comments to it. Then give each part a page in `specs/<name>/specs/`, cut along files that change together, and keep in `architecture.md` only what every part needs.
+- A part that is really a separate subsystem becomes a sibling page in the same folder instead.
+- Parts usually run 800 to 2,500 words. A part under about 400 words joins a neighbor unless it owns separate code. A node left with one page turns back into a single page.
 
 ## When to write each
 
