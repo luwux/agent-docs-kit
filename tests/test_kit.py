@@ -473,21 +473,39 @@ class KitRegressionTests(unittest.TestCase):
             specs = target / "docs" / "specs"
             (specs / "sync.md").write_text(
                 "# Sync\n\nSource: `src/sync/`\n\nStores via [storage](storage.md#schema); "
-                "code in [engine](../../src/sync/engine.ts); see [below](#retries) and `[not a link](x.md)`.\n",
+                "code in [engine](../../src/sync/engine.ts); see [below](#retries) and `[not a link](x.md)`.\n\n"
+                "## Retries\n\nBacks off.\n",
                 encoding="utf-8",
             )
             (specs / "storage.md").write_text(
-                "# Storage\n\nSource: `src/storage/`\n\nSynced by [sync](sync.md#retries).\n", encoding="utf-8"
+                "# Storage\n\nSource: `src/storage/`\n\nSynced by [sync](sync.md#retries).\n\n## Schema\n",
+                encoding="utf-8",
             )
             (target / "src" / "sync" / "engine.ts").write_text("// Spec: docs/specs/sync.md\n", encoding="utf-8")
+            (target / "src" / "sync" / "conflict.ts").write_text(
+                "// Spec: docs/specs/sync.md#retries\n", encoding="utf-8"
+            )
+            (target / "src" / "checks.ts").write_text('export const owner = "sync.md#retries";\n', encoding="utf-8")
+            (target / "src" / "sync" / "transport" / "socket.ts").write_text(
+                "// Retries follow docs/specs/sync.md#retries.\n", encoding="utf-8"
+            )
             (target / "docs" / "notes.md").write_text("Mentions `docs/specs/sync.md` in prose.\n", encoding="utf-8")
+            tasks = target / "docs" / "tasks"
+            (tasks / "0001-done.md").write_text(
+                "# 0001: Done\n\n- Status: Done\n\nEdited `docs/specs/sync.md`.\n", encoding="utf-8"
+            )
+            (tasks / "0002-open.md").write_text(
+                "# 0002: Open\n\n- Status: Open\n\nWill edit `docs/specs/sync.md`.\n", encoding="utf-8"
+            )
             self.assertEqual(self.subsystem_check(target).returncode, 0)
 
             split = self.subsystem_check(target, "--split", "docs/specs/sync.md")
             self.assertEqual(split.returncode, 0, split.stdout + split.stderr)
             self.assertIn("moved docs/specs/sync.md -> docs/specs/sync/architecture.md", split.stdout)
-            mentions = next(line for line in split.stdout.splitlines() if "review plain-text mentions" in line)
-            self.assertIn("docs/notes.md", mentions)
+            self.assertIn("    docs/notes.md:1\n", split.stdout)
+            self.assertIn("    src/checks.ts:1\n", split.stdout)
+            self.assertIn("    docs/tasks/0002-open.md:5\n", split.stdout)
+            self.assertIn("leave mentions in finished records as written: docs/tasks/0001-done.md:5", split.stdout)
             moved = (specs / "sync" / "architecture.md").read_text(encoding="utf-8")
             self.assertIn("[storage](../storage.md#schema)", moved)
             self.assertIn("[engine](../../../src/sync/engine.ts)", moved)
@@ -506,9 +524,78 @@ class KitRegressionTests(unittest.TestCase):
             unfinished = self.subsystem_check(target)
             self.assertEqual(unfinished.returncode, 1, unfinished.stdout + unfinished.stderr)
             self.assertIn("the node has no pages", unfinished.stderr)
-            self.write_pages(specs / "sync" / "architecture.md", {"conflicts.md": "`src/sync/conflict.ts`"})
+
+            # Move the Retries section onto a part page; links to its old anchor now break.
+            node_map = specs / "sync" / "architecture.md"
+            node_map.write_text(moved.split("## Retries")[0], encoding="utf-8")
+            self.write_pages(node_map, {"conflicts.md": "`src/sync/conflict.ts`"})
+            broken = self.subsystem_check(target)
+            self.assertEqual(broken.returncode, 1, broken.stdout + broken.stderr)
+            self.assertIn(
+                "docs/specs/storage.md:5 — sync/architecture.md#retries: docs/specs/sync/architecture.md "
+                "has no heading for #retries",
+                broken.stderr,
+            )
+            refs = self.subsystem_check(target, "--refs", "docs/specs/sync/architecture.md")
+            self.assertEqual(refs.returncode, 0, refs.stdout + refs.stderr)
+            retries = next(line for line in refs.stdout.splitlines() if line.startswith("  #retries"))
+            self.assertIn("no such heading", retries)
+            for place in (
+                "docs/specs/storage.md:5",
+                "docs/specs/sync/architecture.md:5",
+                "src/sync/conflict.ts:1",
+                "src/sync/transport/socket.ts:1",
+            ):
+                self.assertIn(place, retries)
+            self.assertNotIn("#retries.", refs.stdout)
+            plain = next(line for line in refs.stdout.splitlines() if line.startswith("  (no anchor)"))
+            for place in ("AGENTS.md:", "docs/architecture.md:", "src/sync/engine.ts:1"):
+                self.assertIn(place, plain)
+
+            for path in (specs / "storage.md", node_map):
+                path.write_text(
+                    path.read_text(encoding="utf-8").replace("sync/architecture.md#retries", "sync/specs/conflicts.md")
+                    .replace("(#retries)", "(specs/conflicts.md)"),
+                    encoding="utf-8",
+                )
+            # --map refuses while the tree has errors, so regenerate once the links are fixed.
+            self.assertEqual(self.subsystem_check(target, "--map").returncode, 0)
             finished = self.subsystem_check(target)
             self.assertEqual(finished.returncode, 0, finished.stdout + finished.stderr)
+
+    def test_links_must_name_existing_headings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.subsystem_repository(temporary)
+            self.write_pages(target / "docs" / "architecture.md", {"query.md": "`src/sync/`", "store.md": "`src/storage/`"})
+            specs = target / "docs" / "specs"
+            (specs / "query.md").write_text(
+                "# Query\n\nSource: `src/sync/`\n\n"
+                '### `chist search "<q>" [--fts | --semantic]`\n\n'
+                "## 同步与冲突\n\n## Notes\n\n## Notes\n\n<a id=\"legacy\"></a>\n\n"
+                "```\n## Not a heading\n```\n",
+                encoding="utf-8",
+            )
+            links = [
+                'query.md#chist-search-q---fts----semantic',
+                "query.md#同步与冲突",
+                "query.md#%E5%90%8C%E6%AD%A5%E4%B8%8E%E5%86%B2%E7%AA%81",
+                "query.md#notes-1",
+                "query.md#legacy",
+                "../../src/sync/engine.ts#L1",
+            ]
+            (specs / "store.md").write_text(
+                "# Store\n\nSource: `src/storage/`\n\n" + "".join(f"[x]({link}) " for link in links) + "\n",
+                encoding="utf-8",
+            )
+            passed = self.subsystem_check(target)
+            self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
+
+            with (specs / "store.md").open("a", encoding="utf-8") as page:
+                page.write("[x](query.md#not-a-heading) [y](#nowhere)\n")
+            failed = self.subsystem_check(target)
+            self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+            self.assertIn("query.md#not-a-heading: docs/specs/query.md has no heading for #not-a-heading", failed.stderr)
+            self.assertIn("#nowhere: docs/specs/store.md has no heading for #nowhere", failed.stderr)
 
     def test_long_pages_and_maps_get_notes_without_failing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

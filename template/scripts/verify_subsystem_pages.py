@@ -11,8 +11,10 @@ node exactly once; each page starts with a `Source:` line (`Source: none` marks
 a cross-cutting page that owns no paths); each declared path or glob matches
 something and is declared once; every page inside a node declares only paths
 the node's `architecture.md` covers; and relative links in the spec tree
-resolve inside the repository. It does not prove that a page describes the code correctly. It also
-prints notes for pages and maps above their word guides; notes never fail.
+resolve inside the repository, with each `#anchor` naming a heading of its
+Markdown target. It does not prove that a page describes the code correctly.
+It also prints notes for pages and maps above their word guides; notes never
+fail.
 
 `--owner PATH...` prints the page that owns each path. A file path beats a glob,
 a glob beats a directory, and a longer directory beats a shorter one.
@@ -29,8 +31,16 @@ table. `--pointers` lists pages that no owned non-Markdown file names; it exits
 `--split PAGE` turns a page into a node: it moves `specs/<name>.md` to
 `specs/<name>/architecture.md`, creates `specs/<name>/specs/`, rewrites
 relative Markdown links to and from the page, and rewrites the page's
-repository path in non-Markdown files such as pointer comments. The tree fails
-the default check until the node lists at least one page of its own.
+repository path in non-Markdown files such as pointer comments. It then lists
+the remaining mentions of the page's file name, such as link text or a string a
+generator turns into links, apart from those in finished records (decisions,
+research, and tasks that are not open). The tree fails the default check until
+the node lists at least one page of its own.
+
+`--refs PAGE` lists every Markdown link to a Markdown file and every mention of
+its repository path, grouped by `#anchor`, and marks anchors the file no longer
+has. It runs even when the tree fails the default check, so it can find what a
+section move broke.
 """
 
 from __future__ import annotations
@@ -43,6 +53,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import unicodedata
+from urllib.parse import unquote
 
 
 REPOSITORY = Path(__file__).resolve().parent.parent
@@ -56,9 +68,14 @@ AGENTS_FILE = REPOSITORY / "AGENTS.md"
 MAP_START = "<!-- subsystem-map:start"
 MAP_END = "<!-- subsystem-map:end -->"
 # Word guides: a page above PAGE_WORDS is a split candidate; a map above
-# MAP_WORDS carries detail that belongs on its pages. CJK characters count as words.
+# MAP_WORDS carries detail that belongs on its pages. A node's map also documents
+# the files its pages leave unclaimed, so its guide is not much lower than a page's.
+# CJK characters count as words.
 PAGE_WORDS = 4000
-MAP_WORDS = 2500
+MAP_WORDS = 3000
+# Folders under docs/ whose files record history. A task is finished once its
+# status line says anything other than Open.
+RECORD_FOLDERS = {"decisions", "research", "tasks"}
 IGNORED_ENTRY_NAMES = {".DS_Store", "Thumbs.db"}
 POINTER_SIZE_LIMIT = 1_000_000
 PROOF_LIMIT = (
@@ -71,8 +88,12 @@ H1 = re.compile(r"^# \S")
 SOURCE_LINE = re.compile(r"^Source: (?:(?P<none>none)|(?P<paths>`[^`]+`(?:, `[^`]+`)*))$")
 SOURCE_PATH = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"(\]\()([^)\s<>]+)((?:\s+\"[^\"]*\")?\))")
+INLINE_LINK = re.compile(r"!?\[([^\]]*)\]\(([^)\s<>]+)(?:\s+\"[^\"]*\")?\)")
 FENCE = re.compile(r"^\s*(```|~~~)")
-WORD = re.compile(r"[A-Za-z0-9_]+|[぀-ヿ㐀-鿿가-힯]")
+HEADING = re.compile(r"^ {0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$")
+ANCHOR_ATTRIBUTE = re.compile(r"<a\s[^>]*?\b(?:id|name)=[\"']([^\"']+)[\"']")
+TASK_STATUS = re.compile(r"^\W*Status:\s*(\w+)", re.IGNORECASE | re.MULTILINE)
+WORD =re.compile(r"[A-Za-z0-9_]+|[぀-ヿ㐀-鿿가-힯]")
 GLOB_CHARACTERS = set("*?[")
 
 
@@ -159,6 +180,62 @@ def resolve_link(base: Path, target: str) -> Path:
     if path.startswith("./"):
         path = path[2:]
     return Path(os.path.normpath(base / path))
+
+
+def link_target(path: Path, target: str) -> Path | None:
+    """Return the file a link in path points at, or None for an external or root-relative link."""
+
+    if target.startswith("#"):
+        return path
+    if not is_relative_target(target) or not split_target(target)[0]:
+        return None
+    return resolve_link(path.parent, target)
+
+
+def heading_slug(text: str) -> str:
+    """Slug a heading as GitHub does: keep letters, digits, marks, `-`, `_`, and spaces; spaces become `-`."""
+
+    pieces = re.sub(r"\]\([^)]*\)", "]", text).split("`")
+    for index in range(0, len(pieces), 2):
+        pieces[index] = re.sub(r"<[^>]+>", "", pieces[index])
+    kept = (
+        character
+        for character in "".join(pieces).lower()
+        if character.isalnum() or character in "-_ " or unicodedata.category(character).startswith("M")
+    )
+    return "".join(kept).replace(" ", "-")
+
+
+@functools.lru_cache(maxsize=None)
+def anchors(path: Path) -> frozenset[str]:
+    """Return the anchors of a Markdown file: heading slugs, numbered on repeats, and `<a id>` names."""
+
+    counts: dict[str, int] = {}
+    found: set[str] = set()
+    fenced = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        found.update(ANCHOR_ATTRIBUTE.findall(line))
+        match = HEADING.match(line)
+        if match:
+            slug = heading_slug(match.group(1))
+            count = counts.get(slug, 0)
+            found.add(slug if count == 0 else f"{slug}-{count}")
+            counts[slug] = count + 1
+    return frozenset(found)
+
+
+def has_anchor(path: Path, fragment: str) -> bool:
+    """Return whether fragment names an anchor of path; files other than Markdown are not checked."""
+
+    if path.suffix not in {".md", ".mdx"} or not path.is_file():
+        return True
+    fragment = unquote(fragment)
+    return fragment in anchors(path) or fragment.lower() in anchors(path)
 
 
 def map_rows(map_file: Path, pages_dir: Path, errors: list[str]) -> list[Path]:
@@ -330,19 +407,25 @@ def check_containment(pages: list[Page], errors: list[str]) -> None:
 
 
 def check_links(pages: list[Page], errors: list[str]) -> None:
-    """Require relative links in the root map and every page to resolve."""
+    """Require relative links in the root map and every page to resolve, anchors included."""
 
     for path in [ROOT_MAP, *(page.path for page in pages)]:
         if not path.is_file():
             continue
         for number, match in markdown_links(path.read_text(encoding="utf-8")):
             target = match.group(2)
-            if not is_relative_target(target) or not split_target(target)[0]:
-                continue
-            resolved = resolve_link(path.parent, target)
+            resolved = link_target(path, target)
             # A link that leaves the repository depends on the machine's checkout layout.
-            if REPOSITORY in resolved.parents and not resolved.exists():
+            if resolved is None or REPOSITORY not in resolved.parents:
+                continue
+            fragment = split_target(target)[1][1:]
+            if not resolved.exists():
                 errors.append(f"link: {display(path)}:{number} — {target} does not exist")
+            elif fragment and not has_anchor(resolved, fragment):
+                errors.append(
+                    f"link: {display(path)}:{number} — {target}: {display(resolved)} has no heading "
+                    f"for #{fragment}; `--refs {display(resolved)}` lists every reference to its anchors"
+                )
 
 
 def load(errors: list[str]) -> tuple[dict[str, str], list[Page]]:
@@ -567,21 +650,115 @@ def split_page(raw: str, pages: list[Page]) -> int:
     for path, text in pointer_text.items():
         path.write_text(text, encoding="utf-8")
 
-    mentions = sorted(
-        display(path if path != old else new)
-        for path in markdown
-        if (new if path == old else path).is_file()
-        and old_key in (new if path == old else path).read_text(encoding="utf-8")
-    )
+    review: list[str] = []
+    records: list[str] = []
+    for path in markdown + others:
+        current = new if path == old else path
+        try:
+            text = current.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if old.name not in text:
+            continue
+        lines = [
+            str(number) for number, line in enumerate(text.splitlines(), 1) if mentions_page(line, current, old, new)
+        ]
+        if lines:
+            (records if is_finished_record(current) else review).append(f"{display(current)}:{','.join(lines)}")
     print(f"verify_subsystem_pages: moved {old_key} -> {new_key}")
     print(f"  rewrote {link_count} link(s) in {link_files} Markdown file(s)")
     print(f"  rewrote {pointer_count} path mention(s) in {pointer_files} other file(s)")
-    if mentions:
-        print(f"  review plain-text mentions of {old_key} in: {', '.join(mentions)}")
+    if review:
+        print(f"  review these mentions of {old.name}, such as link text or a generator's source strings:")
+        for place in review:
+            print(f"    {place}")
+    if records:
+        print(f"  leave mentions in finished records as written: {', '.join(records)}")
     print(
         f"next: add pages in {display(node / PAGES.name)}/, list each in the table in {new_key}, "
-        "move each part's text and Source paths onto its page, then run --map"
+        "move each part's text and Source paths onto its page, and run --map; then run "
+        f"--refs {new_key} and retarget references whose section moved. If a rewritten file is "
+        "generated, change its source and regenerate it."
     )
+    return 0
+
+
+def mentions_page(line: str, path: Path, old: Path, new: Path) -> bool:
+    """Return whether a line of path names the page moved from old to new by its old name.
+
+    `cli.md` and `specs/cli.md` name `docs/specs/cli.md`; `skill/cli.md` names another file. A
+    link's text counts only when the link leads to the page, so `[cli.md](cli.md)` beside another
+    `cli.md` does not.
+    """
+
+    line = INLINE_LINK.sub(
+        lambda match: match.group(1) if link_target(path, match.group(2)) in {old, new} else "", line
+    )
+    key, name = display(old), old.name
+    for match in re.finditer(r"(?<![\w./-])((?:[\w.-]+/)*)" + re.escape(name) + r"\b", line):
+        folders = [part for part in match.group(1).split("/") if part not in {"", ".", ".."}]
+        mentioned = "/".join([*folders, name])
+        if key == mentioned or key.endswith("/" + mentioned):
+            return True
+    return False
+
+
+def is_finished_record(path: Path) -> bool:
+    """Return whether path is a decision, a research note, or a task whose status is not Open."""
+
+    try:
+        folder = path.relative_to(DOCS).parts[0]
+    except (ValueError, IndexError):
+        return False
+    if folder not in RECORD_FOLDERS:
+        return False
+    if folder != "tasks":
+        return True
+    status = TASK_STATUS.search(path.read_text(encoding="utf-8")[:2000])
+    return status is not None and status.group(1).lower() != "open"
+
+
+def references(target: Path) -> list[tuple[str, int, str]]:
+    """Return (file, line, anchor) for each Markdown link to target and each mention of its repository path."""
+
+    key = display(target)
+    # An anchor in prose ends before trailing sentence punctuation.
+    mention = re.compile(re.escape(key) + r"(?:#([^\s)\]`'\"<>,;]*[^\s)\]`'\"<>,;.:!?]))?")
+    found: set[tuple[str, int, str]] = set()
+    for path in text_files(markdown=True) + text_files(markdown=False):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if path.suffix in {".md", ".mdx"}:
+            for number, match in markdown_links(text):
+                if link_target(path, match.group(2)) == target:
+                    found.add((display(path), number, unquote(split_target(match.group(2))[1][1:])))
+        if key in text:
+            for number, line in enumerate(text.splitlines(), 1):
+                for match in mention.finditer(line):
+                    found.add((display(path), number, unquote(match.group(1) or "")))
+    return sorted(found)
+
+
+def print_references(raw: str) -> int:
+    target = REPOSITORY / repository_relative(raw)
+    if target.suffix not in {".md", ".mdx"} or not target.is_file():
+        print(f"verify_subsystem_pages: {raw} is not a Markdown file of the repository", file=sys.stderr)
+        return 2
+    by_anchor: dict[str, list[str]] = {}
+    for file, number, anchor in references(target):
+        by_anchor.setdefault(anchor, []).append(f"{file}:{number}")
+    total = sum(len(places) for places in by_anchor.values())
+    print(f"verify_subsystem_pages: {total} reference(s) to {display(target)}, by anchor:")
+    missing = False
+    for anchor, places in sorted(by_anchor.items()):
+        absent = bool(anchor) and not has_anchor(target, anchor)
+        missing = missing or absent
+        label = f"#{anchor}" if anchor else "(no anchor)"
+        print(f"  {label}{' — no such heading' if absent else ''} ({len(places)}): {', '.join(places)}")
+    if missing:
+        print("Point each reference marked `no such heading` at the page that now holds the section.")
     return 0
 
 
@@ -719,11 +896,14 @@ def parser() -> argparse.ArgumentParser:
         help="list pages whose owned paths changed against BASE (default HEAD)",
     )
     mode.add_argument("--split", metavar="PAGE", help="turn a single page into a node")
+    mode.add_argument("--refs", metavar="PAGE", help="list links and path mentions of a page by anchor")
     return result
 
 
 def main() -> int:
     args = parser().parse_args()
+    if args.refs:
+        return print_references(args.refs)
     errors: list[str] = []
     owners, pages = load(errors)
     if not errors and not args.map:

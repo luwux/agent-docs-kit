@@ -60,7 +60,7 @@ docs/
 
 Agents find the page for a file without searching. `--map` writes a path-to-page table covering every level into the root `AGENTS.md`, which every agent loads at session start; the default check fails when that table is stale. The root `AGENTS.md` limits the cost: an agent reads only the page that owns a file it edits, reads a node's `architecture.md` only before a change that crosses its pages, corrects only the statements its edit made false, and ends its report with a `Docs:` line. One entry file per owned directory names its page in a comment, for agents that start from code; `--pointers` lists pages that no owned file names.
 
-The default check also prints notes, never failures, for pages over about 4,000 words and maps over about 2,500. A page is split when it is that long and its parts own different files; `--split docs/specs/<name>.md` does the mechanical part, moving the page to `specs/<name>/architecture.md` and rewriting the links and pointer comments that name it, and the agent then moves each part onto its own page.
+The default check also prints notes, never failures, for pages over about 4,000 words and maps over about 3,000. A page is split when it is that long and its parts own different files; `--split docs/specs/<name>.md` does the mechanical part, moving the page to `specs/<name>/architecture.md`, rewriting the links and pointer comments that name it, and listing other mentions of its file name, and the agent then moves each part onto its own page. Links in the spec tree must name existing headings, so the default check catches a link whose section moved; `--refs <page>` lists every reference to a page by anchor, in code and records too.
 
 Two more queries help a reviewer or coordinator:
 
@@ -95,6 +95,7 @@ It proves only that the maps, the tree layout, relative links inside the reposit
 
 ## Changes
 
+- 2026-10-26: after prefill's first split, the check also verifies `#anchors` of links in the spec tree, `--refs` lists references to a page by anchor, `--split` lists mentions of the old file name and leaves finished records' text alone, and the map guide rose to about 3,000 words. `docs/AGENTS.md` says that a dispatcher shared by several parts stays with the node and that a part splits again under the page rule.
 - 2026-10-26: specs became a recursive tree. A page can grow into a node (`architecture.md` plus `specs/`) with `--split`; maps carry the page tables, so `docs/specs/README.md` is gone and its rules live in `docs/AGENTS.md`; the check verifies nesting and links and prints word-count notes. Repositories that keep the old script keep the flat layout; adopting the new script means moving the map to `docs/architecture.md` and its index rows into the map.
 - 2026-10-13: one layout replaces the `full` and `lite` profiles. Agent Notes, their verifier, the prose and simplification skills, and the `testing.md` template are removed; `product.md`, `decisions/`, `tasks/`, and `research/` take over plans and rationale, and specs live in `docs/specs/`. Installed repositories are migrated by hand.
 - 2026-10-13: added specs with `Source:` ownership, the generated `AGENTS.md` table, and `verify_subsystem_pages.py`.
